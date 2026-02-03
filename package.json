@@ -1,0 +1,37 @@
+{
+  "name": "persistent-memory-agent",
+  "version": "1.0.0",
+  "description": "A persistent memory agent project",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "dev": "tsx watch src/main.ts",
+    "lint": "eslint src/",
+    "format": "prettier --write src/",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.71.2",
+    "@langchain/anthropic": "1.3.12",
+    "@langchain/core": "1.1.17",
+    "@langchain/langgraph": "^1.1.2",
+    "better-sqlite3": "^12.6.2",
+    "crypto": "^1.0.1",
+    "dotenv": "^17.2.3",
+    "langchain": "^1.2.12",
+    "redis": "^5.10.0",
+    "zod": "^4.3.5"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9",
+    "@types/node": "^20",
+    "eslint": "^9",
+    "prettier": "^3.8.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5",
+    "typescript-eslint": "^8",
+    "vitest": "^4.0.18"
+  }
+}
