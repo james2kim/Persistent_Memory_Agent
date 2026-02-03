@@ -1,28 +1,27 @@
 import { createClient, RedisClientType } from "redis";
-import  type {SessionState} from '../types';
+import type { SessionState, Message } from '../types';
 import crypto from 'crypto';
-import {
-    MessagesValue,
-  } from '@langchain/langgraph';
-import { networkInterfaces } from "os";
-import { Session } from "inspector";
+import { SummarizeUil } from "../SummarizeUtil";
+import { summarizeMessages } from "../summarizeMessages";
 
 export class RedisSessionStore {
     private client: RedisClientType;
     private maxMessages: number;
     private ttl: number;
     private keyPrefix: string
-
+    private summary: string | undefined
     constructor(opts: {
         redisUrl: string,
         maxMessages: number,
         ttl: number,
         keyPrefix: string
+
     }) {
         this.client = createClient({url: opts.redisUrl})
         this.maxMessages = opts.maxMessages
         this.ttl = opts.ttl
         this.keyPrefix = opts.keyPrefix ?? 'session:'
+        this.summary = ''
 
         this.client.on('error', (err: any) => {
             console.log('Redis Client Error', err)
@@ -49,15 +48,16 @@ export class RedisSessionStore {
             taskState: {},
             taskCache: {},
             messages: [],
-            updatedAt: new Date().toISOString()
+            updatedAt: new Date().toISOString(),
+            summary: ''
         }
     }
 
     async writeSession(sessionId: string, state: SessionState) {
         const k = this.key(sessionId)
+        let result;
         const s = {
             ...state,
-            messages: state.messages.slice(-this.maxMessages),
             updatedAt: new Date().toISOString()
         }
         await this.client.set(k, JSON.stringify(s), {EX: this.ttl})
@@ -72,7 +72,8 @@ export class RedisSessionStore {
             messages: initial.messages ?? base.messages,
             taskState: initial.taskState ?? base.taskState,
             taskCache: initial.taskCache ?? base.taskCache,
-            updatedAt: initial.updatedAt ?? base.updatedAt
+            updatedAt: initial.updatedAt ?? base.updatedAt,
+            summary: initial.summary ?? base.summary
         }
         await this.client.set(this.key(sessionId), JSON.stringify(state), {EX: this.ttl})
         return {
@@ -106,7 +107,7 @@ export class RedisSessionStore {
         return parsed
     }
 
-    async appendMessage(sessionId: string, message: MessagesValue) {
+    async appendMessage(sessionId: string, message: Message) {
         const state = await this.getSession(sessionId)
         const newState = {
             ...state,
@@ -120,7 +121,5 @@ export class RedisSessionStore {
     async getTtl(sessionId: string) {
         return await this.client.ttl(this.key(sessionId))
     }
-
-
 
 }
