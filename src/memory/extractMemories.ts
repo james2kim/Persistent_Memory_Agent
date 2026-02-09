@@ -1,24 +1,25 @@
-
 import dotenv from 'dotenv';
 dotenv.config({ path: '.env.local' });
 import { ChatAnthropic } from '@langchain/anthropic';
-import {memoryExtractionSchema} from './types';
+
+import { memoryExtractionArraySchema } from '../schemas/types';
 
 const model = new ChatAnthropic({
-    model: "claude-sonnet-4-5-20250929",
-    apiKey: process.env.ANTHROPIC_API_KEY,
-  });
+  model: 'claude-sonnet-4-5-20250929',
+  apiKey: process.env.ANTHROPIC_API_KEY,
+});
 
-  const EXTRACT_MEMORIES_SYSTEM_PROMPT = `You are a memory extraction module    
-  inside a persistent memory system. Your sole purpose is to analyze a segment  
-  of conversation between a user and an AI assistant and extract the single most
-   important piece of information worth remembering for future interactions.    
-                                                                                
-  ## Your Task                                                                  
-                                                                                
-  Given a conversation snippet, identify the most valuable piece of information 
-  to persist in long-term memory. Return it as a structured object with a type, 
-  confidence score, and content string.                                         
+const buildExtractionPrompt = (maxMemories: number) => `You are a memory extraction module
+  inside a persistent memory system. Your sole purpose is to analyze a segment
+  of conversation between a user and an AI assistant and extract up to ${maxMemories}
+  important pieces of information worth remembering for future interactions.
+
+  ## Your Task
+
+  Given a conversation snippet, identify the most valuable pieces of information
+  to persist in long-term memory. Return them as an array of structured objects,
+  each with a type, confidence score, and content string. Extract between 0 and
+  ${maxMemories} memories - only extract what is genuinely useful.                                         
                                                                                 
   ## Memory Type Definitions                                                    
                                                                                 
@@ -115,21 +116,26 @@ const model = new ChatAnthropic({
   would obviously already be stored (e.g., the user has mentioned it in the same
    conversation multiple times), still extract it but note it as the most       
   important single item.                                                        
-  5. **One memory only.** Return exactly one memory object. Choose the single
-  most valuable piece of information from the conversation segment. If multiple
-  strong candidates exist, prefer facts and preferences over summaries, and
-  goals over decisions, as they tend to have longer utility.
+  5. **Multiple memories allowed.** Return up to the maximum number of memories
+  specified. Each memory should be distinct and non-overlapping. Prioritize
+  facts and preferences over summaries, and goals over decisions, as they tend
+  to have longer utility. Do not pad with low-quality memories just to reach
+  the maximum - only extract what is genuinely valuable.
   6. **worth_keeping field.** Set \`worth_keeping\` to \`true\` only if the
   conversation contains genuinely useful information worth persisting in
   long-term memory (confidence >= 0.5). Set it to \`false\` if the input is
   gibberish, purely procedural (e.g. "hello", "thanks", "ok"), nonsensical,
   or contains no meaningful personal information. When \`worth_keeping\` is
   \`false\`, still fill in the other fields with your best effort but they
-  will be discarded.`;   
+  will be discarded.`;
 
-const modelWithMemoryStructure = model.withStructuredOutput(memoryExtractionSchema)
+const modelWithMemoryStructure = model.withStructuredOutput(memoryExtractionArraySchema);
 
-export const extractMemories = async (prompt: string) => {
-    const response = await modelWithMemoryStructure.invoke([{role: "system", content: EXTRACT_MEMORIES_SYSTEM_PROMPT}, {role: "user", content: prompt}])
-    return response
-}
+export const extractMemories = async (prompt: string, maxMemories = 5) => {
+  const systemPrompt = buildExtractionPrompt(maxMemories);
+  const response = await modelWithMemoryStructure.invoke([
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: prompt },
+  ]);
+  return response.memories;
+};
