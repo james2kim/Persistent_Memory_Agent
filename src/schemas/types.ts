@@ -35,12 +35,12 @@ export const summarizationSchema = z.object({
 });
 
 export const memorySchema = z.object({
-  id: z.number().int().positive(),
+  id: z.uuid(),
   user_id: z.string(),
   type: z.enum(['preference', 'goal', 'fact', 'decision', 'summary']),
   confidence: z.number().min(0).max(1),
-  content: z.string().min(10).max(200),
-  created_at: isoDateString,
+  content: z.string().min(10).max(1000),
+  created_at: z.union([isoDateString, z.date()]),
 });
 
 export type Memory = z.infer<typeof memorySchema>;
