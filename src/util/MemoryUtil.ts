@@ -1,11 +1,12 @@
-import { SQLMemoryStore } from './sql/SqlMemoryStore';
+import { MemoryStore } from '../stores/MemoryStore';
 import {
   type Message,
   type Memory,
+  type RawChunk,
   searchMemoriesFailureSchema,
   searchMemoriesSuccessSchema,
 } from '../schemas/types';
-import { defaultEmbedding } from './EmbeddingService';
+import { defaultEmbedding } from '../services/EmbeddingService';
 import { z } from 'zod/v4';
 
 type SearchMemoriesSuccess = z.infer<typeof searchMemoriesSuccessSchema>;
@@ -26,6 +27,108 @@ export const MemoryUtil = {
   },
   estimateTokens(text: string) {
     return Math.ceil(text.length / 4);
+  },
+  chunkText(
+    text: string,
+    opts?: { maxTokensPerChunk?: number; overlapTokens?: number; maxChunks?: number }
+  ): RawChunk[] {
+    const MAX_TOKENS = opts?.maxTokensPerChunk ?? 1000;
+    const OVERLAP_TOKENS = opts?.overlapTokens ?? 150;
+    const MAX_CHUNKS = opts?.maxChunks ?? 10_000; // ingestion default: “basically unlimited”
+
+    const estTokens = (s: string) => this.estimateTokens(s);
+    const overlapChars = OVERLAP_TOKENS * 4;
+    const maxCharsPerChunk = MAX_TOKENS * 4;
+
+    const out: RawChunk[] = [];
+    let chunkIndex = 0;
+
+    const pushChunk = (content: string) => {
+      const trimmed = content.trim();
+      if (!trimmed) return;
+
+      out.push({
+        chunkIndex: chunkIndex++,
+        content: trimmed,
+        tokenCount: estTokens(trimmed),
+      });
+    };
+
+    // fast path
+    if (estTokens(text) <= MAX_TOKENS) {
+      pushChunk(text);
+      return out;
+    }
+
+    const paragraphs = text.split(/\n\n+/);
+    let current = '';
+
+    for (const p of paragraphs) {
+      const paragraph = p.trim();
+      if (!paragraph) continue;
+
+      const candidate = current ? `${current}\n\n${paragraph}` : paragraph;
+
+      if (estTokens(candidate) <= MAX_TOKENS) {
+        current = candidate;
+        continue;
+      }
+
+      // current is full; flush it (with overlap)
+      if (current.trim()) {
+        const flushed = current;
+        pushChunk(flushed);
+        if (out.length >= MAX_CHUNKS) break;
+
+        // seed overlap
+        current = flushed.slice(Math.max(0, flushed.length - overlapChars)).trim();
+      }
+
+      // paragraph itself might still be too big => split
+      if (estTokens(paragraph) > MAX_TOKENS) {
+        const sentences = paragraph.split(/(?<=[.!?])\s+/);
+        for (const s of sentences) {
+          const sentence = s.trim();
+          if (!sentence) continue;
+
+          const cand2 = current ? `${current} ${sentence}` : sentence;
+
+          if (estTokens(cand2) <= MAX_TOKENS) {
+            current = cand2;
+            continue;
+          }
+
+          // flush current
+          if (current.trim()) {
+            const flushed2 = current;
+            pushChunk(flushed2);
+            if (out.length >= MAX_CHUNKS) break;
+            current = flushed2.slice(Math.max(0, flushed2.length - overlapChars)).trim();
+          }
+
+          // sentence too big => force split by chars
+          if (estTokens(sentence) > MAX_TOKENS) {
+            for (let i = 0; i < sentence.length; i += maxCharsPerChunk) {
+              pushChunk(sentence.slice(i, i + maxCharsPerChunk));
+              if (out.length >= MAX_CHUNKS) break;
+            }
+            current = '';
+          } else {
+            current = sentence;
+          }
+
+          if (out.length >= MAX_CHUNKS) break;
+        }
+      } else {
+        current = paragraph;
+      }
+
+      if (out.length >= MAX_CHUNKS) break;
+    }
+
+    if (current.trim() && out.length < MAX_CHUNKS) pushChunk(current);
+
+    return out;
   },
   applyBudget(memories: Memory[], options?: { maxMemories?: number; maxTokens?: number }) {
     const MAX_MEMORIES = options?.maxMemories ?? 5;
@@ -88,37 +191,6 @@ export const MemoryUtil = {
     }
     return dot / (Math.sqrt(na) * Math.sqrt(nb));
   },
-  async listMemoriesBySimilarity({
-    userId,
-    queryText,
-    poolSize = 50,
-    topK = 5,
-    minConfidence = 0.4,
-    allowedTypes,
-  }: {
-    userId: string;
-    queryText: string;
-    poolSize?: number;
-    topK?: number;
-    minConfidence?: number;
-    allowedTypes?: Memory['type'][];
-  }) {
-    const queryEmbedding = await defaultEmbedding.embedText(queryText, 'query');
-    const pool = SQLMemoryStore.listMemories({ user_id: userId, limit: poolSize, minConfidence });
-    const typeFiltered = allowedTypes ? pool.filter((m) => allowedTypes!.includes(m.type)) : pool;
-    const scored = typeFiltered
-      .filter((m) => !!m.embedding)
-      .map((m) => {
-        const emb = JSON.parse(m.embedding as unknown as string) as number[];
-        return { mem: m, sim: this.cosineSimilarity(queryEmbedding as number[], emb) };
-      })
-      .sort((a, b) => b.sim - a.sim)
-      .slice(0, topK)
-      .map((m) => m.mem);
-
-    return scored;
-  },
-
   async retrieveRelevantMemories(
     userId: string,
     queryText: string,
@@ -127,7 +199,6 @@ export const MemoryUtil = {
       maxTokens?: number;
       minConfidence?: number;
       allowedTypes?: Memory['type'][];
-      poolSize?: number;
     }
   ): Promise<SearchMemoriesResult> {
     const baseFailure = {
@@ -139,7 +210,6 @@ export const MemoryUtil = {
         maxTokens: options.maxTokens,
         minConfidence: options.minConfidence,
         allowedTypes: options.allowedTypes,
-        poolSize: options.poolSize,
       },
     };
 
@@ -162,38 +232,15 @@ export const MemoryUtil = {
       });
     }
 
-    // Step 2: Query SQL for candidate memories
-    let pool: Memory[];
-    try {
-      pool = SQLMemoryStore.listMemories({
-        user_id: userId,
-        limit: options?.poolSize ?? 50,
-        minConfidence: options?.minConfidence ?? 0.5,
-      });
-      console.log('pool', pool);
-    } catch (err) {
-      return searchMemoriesFailureSchema.parse({
-        ...baseFailure,
-        error_type: 'failed_sql_query',
-        error_message: err instanceof Error ? err.message : 'Unknown SQL query error',
-      });
-    }
-
     // Step 3: Filter, score, and rank
     try {
-      const typeFiltered = options.allowedTypes
-        ? pool.filter((m) => options.allowedTypes!.includes(m.type))
-        : pool;
-
-      const scored = typeFiltered
-        .filter((m) => !!m.embedding)
-        .map((m) => {
-          const emb = JSON.parse(m.embedding as unknown as string) as number[];
-          return { mem: m, sim: this.cosineSimilarity(queryEmbedding, emb) };
-        })
-        .sort((a, b) => b.sim - a.sim)
-        .slice(0, options?.maxResults ?? 10)
-        .map((m) => m.mem);
+      const scored = await MemoryStore.listMemoriesBySimilarity({
+        user_id: userId,
+        allowedTypes: options.allowedTypes,
+        minConfidence: options.minConfidence,
+        embedding: queryEmbedding as number[],
+        topK: options.maxResults,
+      });
 
       const memoriesByRelevance = scored.filter((mem) => this.passRelevanceRules(mem));
       const ranked = memoriesByRelevance
@@ -216,15 +263,14 @@ export const MemoryUtil = {
           maxTokens: options.maxTokens ?? 800,
           minConfidence: options.minConfidence ?? 0.5,
           allowedTypes: options.allowedTypes,
-          poolSize: options.poolSize ?? 50,
         },
         count: results.length,
       });
     } catch (err) {
       return searchMemoriesFailureSchema.parse({
         ...baseFailure,
-        error_type: 'unknown_runtime_error',
-        error_message: err instanceof Error ? err.message : 'Unknown error during memory retrieval',
+        error_type: 'failed_sql_query',
+        error_message: err instanceof Error ? err.message : 'Unknown SQL query error',
       });
     }
   },

@@ -1,7 +1,7 @@
 import { tool } from 'langchain';
 import { searchMemoriesInputSchema } from '../schemas/types';
 import type { SearchMemoriesInput } from '../schemas/types';
-import { MemoryUtil } from '../memory/MemoryUtil';
+import { MemoryUtil } from '../util/MemoryUtil';
 import { getUserId } from '../config';
 
 export const searchMemoriesTool = tool(

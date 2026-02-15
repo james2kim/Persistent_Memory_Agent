@@ -2,8 +2,8 @@ import dotenv from 'dotenv';
 dotenv.config({ path: '.env.local' });
 
 import crypto from 'crypto';
-import { RedisSessionStore } from './memory/redis/RedisSessionStore';
-import { RedisCheckpointer } from './memory/redis/RedisCheckpointer';
+import { RedisSessionStore } from './stores/RedisSessionStore';
+import { RedisCheckpointer } from './memory/RedisCheckpointer';
 import { getUserId } from './config';
 import { buildWorkflow } from './agent/graph';
 

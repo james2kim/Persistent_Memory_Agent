@@ -1,5 +1,5 @@
 import { createClient, RedisClientType } from 'redis';
-import type { SessionState, Message } from '../../schemas/types';
+import type { SessionState, Message } from '../schemas/types';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
 dotenv.config({ path: '.env.local' });

@@ -16,10 +16,7 @@ export class EmbeddingService {
     return vec.map((v) => v / norm);
   }
 
-  async embedText(
-    text: string,
-    inputType: 'document' | 'query' = 'document'
-  ): Promise<number[] | undefined> {
+  async embedText(text: string, inputType: 'document' | 'query' = 'document'): Promise<number[]> {
     const response = await this.client.embed({
       input: text,
       model: this.model,

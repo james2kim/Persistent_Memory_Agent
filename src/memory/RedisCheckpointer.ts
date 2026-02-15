@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import {
   BaseCheckpointSaver,
   Checkpoint,
@@ -7,8 +8,8 @@ import {
 import type { RunnableConfig } from '@langchain/core/runnables';
 import type { PendingWrite } from '@langchain/langgraph-checkpoint';
 import type { RedisClientType } from 'redis';
-import { RedisSessionStoreClass } from './RedisSessionStore';
-import type { SessionState } from '../../schemas/types';
+import { RedisSessionStoreClass } from '../stores/RedisSessionStore';
+import type { SessionState } from '../schemas/types';
 
 export class RedisCheckpointer extends BaseCheckpointSaver {
   private store: RedisSessionStoreClass;
@@ -53,7 +54,6 @@ export class RedisCheckpointer extends BaseCheckpointSaver {
     config: RunnableConfig,
     _options?: { limit?: number }
   ): AsyncGenerator<CheckpointTuple> {
-    // Only return latest checkpoint since we don't store history
     const tuple = await this.getTuple(config);
     if (tuple) {
       yield tuple;

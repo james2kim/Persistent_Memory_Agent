@@ -20,6 +20,15 @@ export const memoryExtractionArraySchema = z.object({
 
 export type MemoryExtractionArray = z.infer<typeof memoryExtractionArraySchema>;
 
+export const retrievalGateAssessmentSchema = z.object({
+  requiresExternalTruth: z.boolean(),
+  ambiguity: z.enum(['low', 'moderate', 'high']),
+  risk: z.enum(['low', 'moderate', 'high']),
+  notes: z.string().min(10).max(200),
+});
+
+export type RetrievalGateAssessment = z.infer<typeof retrievalGateAssessmentSchema>;
+
 export const summarizationSchema = z.object({
   confidence: z.number().min(0).max(1),
   content: z.string().min(50).max(1200),
@@ -32,7 +41,6 @@ export const memorySchema = z.object({
   confidence: z.number().min(0).max(1),
   content: z.string().min(10).max(200),
   created_at: isoDateString,
-  embedding: z.string(),
 });
 
 export type Memory = z.infer<typeof memorySchema>;
@@ -53,7 +61,6 @@ export const searchMemoriesInputSchema = z.object({
     maxTokens: z.number().max(2000),
     minConfidence: z.number().min(0.1).max(1).default(0.5),
     allowedTypes: z.array(z.enum(['preference', 'goal', 'fact', 'decision', 'summary'])).optional(),
-    poolSize: z.number().max(100).default(50),
   }),
 });
 export type SearchMemoriesInput = z.infer<typeof searchMemoriesInputSchema>;
@@ -68,7 +75,6 @@ export const searchMemoriesSuccessSchema = z.object({
     maxTokens: z.number().max(2000),
     minConfidence: z.number().min(0.1).max(1),
     allowedTypes: z.array(z.enum(['preference', 'goal', 'fact', 'decision', 'summary'])).optional(),
-    poolSize: z.number().max(100),
   }),
   count: z.number().int().min(0),
 });
@@ -85,7 +91,6 @@ export const searchMemoriesFailureSchema = z.object({
       allowedTypes: z
         .array(z.enum(['preference', 'goal', 'fact', 'decision', 'summary']))
         .optional(),
-      poolSize: z.number().max(100).optional(),
     })
     .partial(),
   error_type: z.enum([
@@ -153,3 +158,19 @@ export const AgentStateSchema = new StateSchema({
   userId: z.string(),
 });
 export type AgentState = typeof AgentStateSchema.State;
+
+export type RawChunk = {
+  chunkIndex: number;
+  content: string;
+  tokenCount: number;
+  metadata?: Record<string, unknown>;
+};
+
+export const IngestDocumentSchema = z.object({
+  source: z.string(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+  title: z.string(),
+  text: z.string(),
+});
+
+export type IngestDocument = z.infer<typeof IngestDocumentSchema>;

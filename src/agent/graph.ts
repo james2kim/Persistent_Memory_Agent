@@ -1,6 +1,6 @@
 import { StateGraph, START, END } from '@langchain/langgraph';
 import { AgentStateSchema } from '../schemas/types';
-import { RedisCheckpointer } from '../memory/redis/RedisCheckpointer';
+import { RedisCheckpointer } from '../memory/RedisCheckpointer';
 import {
   classifyLLMToolIntent,
   verifyAndExecuteToolIntent,

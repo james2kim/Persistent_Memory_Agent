@@ -10,7 +10,9 @@
     "lint": "eslint src/",
     "format": "prettier --write src/",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "migrate": "knex --knexfile knexfile.ts migrate:latest",
+    "migrate:rollback": "knex --knexfile knexfile.ts migrate:rollback"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.2",
@@ -20,7 +22,9 @@
     "better-sqlite3": "^12.6.2",
     "crypto": "^1.0.1",
     "dotenv": "^17.2.3",
+    "knex": "^3.1.0",
     "langchain": "^1.2.12",
+    "pg": "^8.18.0",
     "redis": "^5.10.0",
     "voyageai": "^0.1.0",
     "zod": "^4.3.5"
@@ -28,9 +32,10 @@
   "devDependencies": {
     "@eslint/js": "^9",
     "@types/better-sqlite3": "^7.6.13",
-    "@types/node": "^20",
+    "@types/node": "^20.19.33",
     "eslint": "^9",
     "prettier": "^3.8.0",
+    "ts-node": "^10.9.2",
     "tsx": "^4.21.0",
     "typescript": "^5",
     "typescript-eslint": "^8",

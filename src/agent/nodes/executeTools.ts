@@ -4,7 +4,6 @@ import { TOOLS_BY_NAME, TOOLS_INPUT_SCHEMAS } from '../../tools/tools';
 import { OrchestrationUtil } from '../../util/OrchestrationUtil';
 
 export const verifyAndExecuteToolIntent = async (state: AgentState) => {
-  console.log('NODE2', state);
   const toolMessages: ToolMessage[] = [];
 
   for (const toolCall of state.tool_calls ?? []) {
