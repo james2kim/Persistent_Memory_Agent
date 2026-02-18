@@ -166,6 +166,11 @@ export type RawChunk = {
   metadata?: Record<string, unknown>;
 };
 
+export interface RetrievedChunk extends RawChunk {
+  created_at: string;
+  embedding: number[];
+}
+
 export const IngestDocumentSchema = z.object({
   source: z.string(),
   metadata: z.record(z.string(), z.unknown()).optional(),
@@ -174,3 +179,73 @@ export const IngestDocumentSchema = z.object({
 });
 
 export type IngestDocument = z.infer<typeof IngestDocumentSchema>;
+
+// Search Documents (RAG) schemas
+export const searchDocumentsInputSchema = z.object({
+  queryText: z.string().describe('The search query to find relevant document chunks'),
+  options: z
+    .object({
+      topK: z.number().min(1).max(20).default(5).describe('Number of chunks to return'),
+    })
+    .optional(),
+});
+export type SearchDocumentsInput = z.infer<typeof searchDocumentsInputSchema>;
+
+export const documentChunkSchema = z.object({
+  id: z.string(),
+  document_id: z.string(),
+  chunk_index: z.number(),
+  content: z.string(),
+  token_count: z.number(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+});
+export type DocumentChunk = z.infer<typeof documentChunkSchema>;
+
+export const searchDocumentsSuccessSchema = z.object({
+  success: z.literal(true),
+  chunks: z.array(documentChunkSchema),
+  queryText: z.string(),
+  count: z.number(),
+});
+
+export const searchDocumentsFailureSchema = z.object({
+  success: z.literal(false),
+  queryText: z.string(),
+  error_type: z.enum(['embedding_error', 'query_error', 'no_results']),
+  error_message: z.string(),
+});
+
+// Retrieval Gate Decision Schema
+export const retrievalGateDecisionSchema = z.object({
+  shouldRetrieveDocuments: z.boolean().describe('Whether to search the document corpus'),
+  shouldRetrieveMemories: z.boolean().describe('Whether to search long-term memories'),
+  reasoning: z.string().max(200).describe('Brief explanation of the decision'),
+});
+export type RetrievalGateDecision = z.infer<typeof retrievalGateDecisionSchema>;
+
+// Retrieved Context Schema (stored in agent state)
+export const retrievedContextSchema = z.object({
+  documents: z.array(documentChunkSchema).default([]),
+  memories: z.array(memorySchema).default([]),
+  gateDecision: retrievalGateDecisionSchema.optional(),
+});
+export type RetrievedContext = z.infer<typeof retrievedContextSchema>;
+
+// Knowledge Extraction Schema (for extractAndStoreKnowledge node)
+export const studyMaterialExtractionSchema = z.object({
+  title: z.string().min(3).max(200).describe('A descriptive title for the study material'),
+  content: z.string().min(20).describe('The study content to store'),
+  subject: z.string().max(100).optional().describe('Subject area (e.g., Biology, History)'),
+});
+export type StudyMaterialExtraction = z.infer<typeof studyMaterialExtractionSchema>;
+
+export const knowledgeExtractionSchema = z.object({
+  contentType: z
+    .enum(['study_material', 'personal_memory', 'ephemeral'])
+    .describe(
+      'study_material: factual content to learn/reference. personal_memory: user preferences/goals/decisions. ephemeral: conversational, not worth storing.'
+    ),
+  studyMaterial: studyMaterialExtractionSchema.optional(),
+  memories: z.array(memoryExtractionSchema).optional(),
+});
+export type KnowledgeExtraction = z.infer<typeof knowledgeExtractionSchema>;

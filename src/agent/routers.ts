@@ -4,7 +4,7 @@ import { MAX_TOOL_ATTEMPTS, MAX_MESSAGES } from './constants';
 
 export const node1ConditionalRouter = (state: AgentState) => {
   if (state.response) {
-    return 'extractAndAddMemory';
+    return 'extractAndStoreKnowledge';
   }
   if (state?.taskState?.attempts >= MAX_TOOL_ATTEMPTS) {
     return END;

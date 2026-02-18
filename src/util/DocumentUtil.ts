@@ -1,109 +1,234 @@
-import { type RawChunk } from '../schemas/types';
+import { RecursiveCharacterTextSplitter } from '@langchain/textsplitters';
+import type { RawChunk, RetrievedChunk, DocumentChunk } from '../schemas/types';
+import type { DocumentStore } from '../stores/DocumentStore';
+
+// Budget constraints for document retrieval
+const DEFAULT_BUDGET = {
+  maxContextTokens: 2500,
+  maxChunks: 8,
+  maxPerDoc: 2,
+  maxChunkTokens: 700,
+} as const;
+
+export type BudgetOptions = Partial<typeof DEFAULT_BUDGET>;
 
 export const DocumentUtil = {
   estimateTokens(text: string) {
     return Math.ceil(text.length / 4);
   },
-  chunkText(
-    text: string,
-    opts?: { maxTokensPerChunk?: number; overlapTokens?: number; maxChunks?: number }
-  ): RawChunk[] {
-    const MAX_TOKENS = opts?.maxTokensPerChunk ?? 1000;
-    const OVERLAP_TOKENS = opts?.overlapTokens ?? 150;
-    const MAX_CHUNKS = opts?.maxChunks ?? 10_000; // ingestion default: “basically unlimited”
 
-    const estTokens = (s: string) => this.estimateTokens(s);
-    const overlapChars = OVERLAP_TOKENS * 4;
-    const maxCharsPerChunk = MAX_TOKENS * 4;
-
-    const out: RawChunk[] = [];
-    let chunkIndex = 0;
-
-    const pushChunk = (content: string) => {
-      const trimmed = content.trim();
-      if (!trimmed) return;
-
-      out.push({
-        chunkIndex: chunkIndex++,
-        content: trimmed,
-        tokenCount: estTokens(trimmed),
-      });
-    };
-
-    // fast path
-    if (estTokens(text) <= MAX_TOKENS) {
-      pushChunk(text);
-      return out;
+  cosineSimilarity(a: number[], b: number[]) {
+    let dot = 0,
+      na = 0,
+      nb = 0;
+    for (let i = 0; i < a.length; i++) {
+      dot += a[i] * b[i];
+      na += a[i] * a[i];
+      nb += b[i] * b[i];
     }
+    if (na === 0 || nb === 0) {
+      return 0;
+    }
+    return dot / (Math.sqrt(na) * Math.sqrt(nb));
+  },
 
-    const paragraphs = text.split(/\n\n+/);
-    let current = '';
+  removeDuplicateChunks(chunks: RetrievedChunk[], threshold = 0.92) {
+    const kept: RetrievedChunk[] = [];
 
-    for (const p of paragraphs) {
-      const paragraph = p.trim();
-      if (!paragraph) continue;
-
-      const candidate = current ? `${current}\n\n${paragraph}` : paragraph;
-
-      if (estTokens(candidate) <= MAX_TOKENS) {
-        current = candidate;
+    for (const c of chunks) {
+      if (!c.embedding?.length) {
+        kept.push(c);
         continue;
       }
 
-      // current is full; flush it (with overlap)
-      if (current.trim()) {
-        const flushed = current;
-        pushChunk(flushed);
-        if (out.length >= MAX_CHUNKS) break;
+      let isDup = false;
+      for (const k of kept) {
+        if (!k.embedding?.length) continue;
 
-        // seed overlap
-        current = flushed.slice(Math.max(0, flushed.length - overlapChars)).trim();
-      }
-
-      // paragraph itself might still be too big => split
-      if (estTokens(paragraph) > MAX_TOKENS) {
-        const sentences = paragraph.split(/(?<=[.!?])\s+/);
-        for (const s of sentences) {
-          const sentence = s.trim();
-          if (!sentence) continue;
-
-          const cand2 = current ? `${current} ${sentence}` : sentence;
-
-          if (estTokens(cand2) <= MAX_TOKENS) {
-            current = cand2;
-            continue;
-          }
-
-          // flush current
-          if (current.trim()) {
-            const flushed2 = current;
-            pushChunk(flushed2);
-            if (out.length >= MAX_CHUNKS) break;
-            current = flushed2.slice(Math.max(0, flushed2.length - overlapChars)).trim();
-          }
-
-          // sentence too big => force split by chars
-          if (estTokens(sentence) > MAX_TOKENS) {
-            for (let i = 0; i < sentence.length; i += maxCharsPerChunk) {
-              pushChunk(sentence.slice(i, i + maxCharsPerChunk));
-              if (out.length >= MAX_CHUNKS) break;
-            }
-            current = '';
-          } else {
-            current = sentence;
-          }
-
-          if (out.length >= MAX_CHUNKS) break;
+        const sim = this.cosineSimilarity(c.embedding, k.embedding);
+        if (sim >= threshold) {
+          isDup = true;
+          break;
         }
-      } else {
-        current = paragraph;
       }
 
-      if (out.length >= MAX_CHUNKS) break;
+      if (!isDup) kept.push(c);
     }
 
-    if (current.trim() && out.length < MAX_CHUNKS) pushChunk(current);
+    return kept;
+  },
 
-    return out;
+  async chunkText(
+    documentId: string,
+    text: string,
+    opts?: { maxTokensPerChunk?: number; overlapTokens?: number }
+  ): Promise<RawChunk[]> {
+    const maxTokens = opts?.maxTokensPerChunk ?? 500;
+    const overlapTokens = opts?.overlapTokens ?? 80;
+
+    const splitter = new RecursiveCharacterTextSplitter({
+      chunkSize: maxTokens,
+      chunkOverlap: overlapTokens,
+      lengthFunction: (t) => Math.ceil(t.length / 4),
+    });
+
+    const chunks = await splitter.splitText(text);
+
+    return chunks
+      .map((content, index) => ({
+        chunkIndex: index,
+        content: content.trim(),
+        tokenCount: Math.ceil(content.length / 4),
+        documentId,
+        metadata: {}, // later: sectionTitle, headingPath, page, etc.
+      }))
+      .filter((c) => c.content.length > 0);
+  },
+  passRelevanceRules(chunk: RetrievedChunk) {
+    const text = chunk.content?.trim() ?? '';
+    if (text.length < 30) return false;
+
+    const uploadedAtRaw = (chunk.metadata?.uploadedAt as string | undefined) ?? chunk.created_at;
+
+    const uploadedAt = new Date(uploadedAtRaw);
+    if (Number.isNaN(uploadedAt.getTime())) return false;
+
+    const daysSinceUpload = (Date.now() - uploadedAt.getTime()) / 86400000;
+
+    const maxAgeDays = 360;
+    if (daysSinceUpload > maxAgeDays) return false;
+
+    const fileType = chunk.metadata?.fileType as string | undefined;
+    if (fileType && !['pdf', 'txt', 'md', 'docx'].includes(fileType)) return false;
+
+    return true;
+  },
+
+  /**
+   * Apply budget constraints to retrieved chunks.
+   * Chunks should be pre-sorted by relevance (most relevant first).
+   *
+   * Constraints applied in order:
+   * 1. Filter chunks exceeding maxChunkTokens
+   * 2. Limit chunks per document to maxPerDoc
+   * 3. Limit total chunks to maxChunks
+   * 4. Limit total context tokens to maxContextTokens
+   */
+  applyBudget(chunks: DocumentChunk[], options?: BudgetOptions): DocumentChunk[] {
+    const {
+      maxContextTokens = DEFAULT_BUDGET.maxContextTokens,
+      maxChunks = DEFAULT_BUDGET.maxChunks,
+      maxPerDoc = DEFAULT_BUDGET.maxPerDoc,
+      maxChunkTokens = DEFAULT_BUDGET.maxChunkTokens,
+    } = options ?? {};
+
+    const tokenCount = (c: DocumentChunk) => {
+      const t = c.token_count;
+      if (typeof t === 'number' && t > 0) return t;
+      // ~4 chars/token heuristic
+      return Math.ceil((c.content?.length ?? 0) / 4);
+    };
+
+    // 1) Filter *softly*: keep the first chunk even if it’s large
+    const validChunks: DocumentChunk[] = [];
+    for (let i = 0; i < chunks.length; i++) {
+      const c = chunks[i];
+      const t = tokenCount(c);
+      if (t <= maxChunkTokens || i === 0) validChunks.push(c);
+    }
+
+    // 2) Limit chunks per document
+    const docCounts = new Map<string, number>();
+    const perDocFiltered: DocumentChunk[] = [];
+
+    for (const chunk of validChunks) {
+      const docId = chunk.document_id ?? '__unknown__';
+      const count = docCounts.get(docId) ?? 0;
+      if (count < maxPerDoc) {
+        perDocFiltered.push(chunk);
+        docCounts.set(docId, count + 1);
+      }
+    }
+
+    // 3 & 4) Limit total chunks and total tokens
+    const selected: DocumentChunk[] = [];
+    let totalTokens = 0;
+
+    for (const chunk of perDocFiltered) {
+      if (selected.length >= maxChunks) break;
+
+      const t = tokenCount(chunk);
+      if (totalTokens + t > maxContextTokens) continue; // <-- key fix
+
+      selected.push(chunk);
+      totalTokens += t;
+    }
+
+    return selected;
+  },
+
+  /**
+   * Retrieve relevant chunks from the document store.
+   *
+   * Pipeline:
+   * 1. Fetch topK similar chunks from DocumentStore
+   * 2. Filter by relevance rules
+   * 3. Remove near-duplicate chunks
+   * 4. Apply budget constraints
+   */
+  async retrieveRelevantChunks(
+    store: DocumentStore,
+    input: {
+      queryEmbedding: number[];
+      user_id: string;
+      topK?: number;
+    },
+    budgetOptions?: BudgetOptions
+  ): Promise<DocumentChunk[]> {
+    const topK = input.topK ?? 20;
+
+    // 1. Fetch topK similar chunks
+    const rawChunks = await store.listChunksBySimilarity({
+      queryEmbedding: input.queryEmbedding,
+      user_id: input.user_id,
+      topK,
+    });
+
+    if (rawChunks.length === 0) {
+      return [];
+    }
+
+    // Convert to extended format that carries all needed data
+    type ExtendedChunk = RetrievedChunk & { id: string; document_id: string };
+
+    const extendedChunks: ExtendedChunk[] = rawChunks.map((chunk) => ({
+      id: chunk.id,
+      document_id: chunk.document_id,
+      chunkIndex: chunk.chunk_index,
+      content: chunk.content,
+      tokenCount: chunk.token_count,
+      metadata: chunk.metadata,
+      created_at: chunk.created_at,
+      embedding: chunk.embedding,
+    }));
+
+    // 2. Filter by relevance rules
+    const relevant = extendedChunks.filter((chunk) => this.passRelevanceRules(chunk));
+
+    // 3. Remove near-duplicates
+    const deduped = this.removeDuplicateChunks(relevant as RetrievedChunk[]) as ExtendedChunk[];
+
+    // 4. Convert to DocumentChunk format for budget application
+    const documentChunks: DocumentChunk[] = deduped.map((chunk) => ({
+      id: chunk.id,
+      document_id: chunk.document_id,
+      chunk_index: chunk.chunkIndex,
+      content: chunk.content,
+      token_count: chunk.tokenCount,
+      metadata: chunk.metadata,
+    }));
+
+    // 5. Apply budget constraints
+    return this.applyBudget(documentChunks, budgetOptions);
   },
 };

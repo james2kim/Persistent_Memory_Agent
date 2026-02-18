@@ -4,22 +4,22 @@ import { RedisCheckpointer } from '../memory/RedisCheckpointer';
 import {
   classifyLLMToolIntent,
   verifyAndExecuteToolIntent,
-  extractAndAddMemory,
+  extractAndStoreKnowledge,
   summarizeMessages,
 } from './nodes';
 import { node1ConditionalRouter, node3ConditionalRouter } from './routers';
 
-export const buildWorkflow = (checkpointer: RedisCheckpointer) => {
+export function buildWorkflow(checkpointer: RedisCheckpointer) {
   const workflow = new StateGraph(AgentStateSchema)
     .addNode('classifyLlmToolIntent', classifyLLMToolIntent)
     .addNode('verifyAndExecuteToolIntent', verifyAndExecuteToolIntent)
-    .addNode('extractAndAddMemory', extractAndAddMemory)
+    .addNode('extractAndStoreKnowledge', extractAndStoreKnowledge)
     .addNode('summarizeMessages', summarizeMessages)
     .addEdge(START, 'classifyLlmToolIntent')
     .addConditionalEdges('classifyLlmToolIntent', node1ConditionalRouter)
     .addEdge('verifyAndExecuteToolIntent', 'classifyLlmToolIntent')
-    .addConditionalEdges('extractAndAddMemory', node3ConditionalRouter)
+    .addConditionalEdges('extractAndStoreKnowledge', node3ConditionalRouter)
     .addEdge('summarizeMessages', END);
 
   return workflow.compile({ checkpointer });
-};
+}

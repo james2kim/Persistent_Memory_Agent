@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Memory Agent Chat</title>
+    <style>
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        background: #f5f5f5;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+
+      header {
+        background: #2c3e50;
+        color: white;
+        padding: 1rem;
+        text-align: center;
+      }
+
+      header h1 {
+        font-size: 1.25rem;
+        font-weight: 500;
+      }
+
+      .container {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        max-width: 800px;
+        margin: 0 auto;
+        width: 100%;
+        padding: 1rem;
+        gap: 1rem;
+      }
+
+      .messages {
+        flex: 1;
+        overflow-y: auto;
+        background: white;
+        border-radius: 8px;
+        padding: 1rem;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+      }
+
+      .message {
+        margin-bottom: 1rem;
+        padding: 0.75rem 1rem;
+        border-radius: 8px;
+        max-width: 85%;
+      }
+
+      .message.user {
+        background: #3498db;
+        color: white;
+        margin-left: auto;
+      }
+
+      .message.assistant {
+        background: #ecf0f1;
+        color: #2c3e50;
+      }
+
+      .message.system {
+        background: #f8f9fa;
+        color: #666;
+        font-size: 0.875rem;
+        text-align: center;
+        max-width: 100%;
+      }
+
+      .input-area {
+        display: flex;
+        gap: 0.5rem;
+        background: white;
+        padding: 1rem;
+        border-radius: 8px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+      }
+
+      #message-input {
+        flex: 1;
+        padding: 0.75rem;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-size: 1rem;
+      }
+
+      #message-input:focus {
+        outline: none;
+        border-color: #3498db;
+      }
+
+      button {
+        padding: 0.75rem 1.5rem;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 1rem;
+        transition: background 0.2s;
+      }
+
+      #send-btn {
+        background: #3498db;
+        color: white;
+      }
+
+      #send-btn:hover {
+        background: #2980b9;
+      }
+
+      #send-btn:disabled {
+        background: #bdc3c7;
+        cursor: not-allowed;
+      }
+
+      .upload-area {
+        display: flex;
+        gap: 0.5rem;
+        align-items: center;
+        background: white;
+        padding: 1rem;
+        border-radius: 8px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+      }
+
+      .upload-area label {
+        font-size: 0.875rem;
+        color: #666;
+      }
+
+      #file-input {
+        flex: 1;
+      }
+
+      #upload-btn {
+        background: #27ae60;
+        color: white;
+      }
+
+      #upload-btn:hover {
+        background: #229954;
+      }
+
+      #upload-btn:disabled {
+        background: #bdc3c7;
+        cursor: not-allowed;
+      }
+
+      .loading {
+        display: inline-block;
+        width: 20px;
+        height: 20px;
+        border: 2px solid #fff;
+        border-radius: 50%;
+        border-top-color: transparent;
+        animation: spin 0.8s linear infinite;
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      .status {
+        font-size: 0.75rem;
+        color: #666;
+        margin-top: 0.25rem;
+      }
+
+      .message.thinking {
+        background: #ecf0f1;
+        color: #7f8c8d;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+
+      .thinking-dots {
+        display: flex;
+        gap: 4px;
+      }
+
+      .thinking-dots span {
+        width: 8px;
+        height: 8px;
+        background: #7f8c8d;
+        border-radius: 50%;
+        animation: bounce 1.4s infinite ease-in-out both;
+      }
+
+      .thinking-dots span:nth-child(1) {
+        animation-delay: -0.32s;
+      }
+      .thinking-dots span:nth-child(2) {
+        animation-delay: -0.16s;
+      }
+      .thinking-dots span:nth-child(3) {
+        animation-delay: 0s;
+      }
+
+      @keyframes bounce {
+        0%,
+        80%,
+        100% {
+          transform: scale(0);
+        }
+        40% {
+          transform: scale(1);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Study Assistant Agent</h1>
+    </header>
+
+    <div class="container">
+      <div class="messages" id="messages">
+        <div class="message system">
+          Welcome! Send a message to chat with the agent, or upload a document to add it to the
+          knowledge base.
+        </div>
+      </div>
+
+      <div class="input-area">
+        <input
+          type="text"
+          id="message-input"
+          placeholder="Type your message..."
+          autocomplete="off"
+        />
+        <button id="send-btn">Send</button>
+      </div>
+
+      <div class="upload-area">
+        <label>Upload Document (PDF, Word, Markdown, Text):</label>
+        <input type="file" id="file-input" accept=".pdf,.docx,.doc,.md,.txt" />
+        <button id="upload-btn">Upload</button>
+      </div>
+    </div>
+
+    <script>
+      const messagesContainer = document.getElementById('messages');
+      const messageInput = document.getElementById('message-input');
+      const sendBtn = document.getElementById('send-btn');
+      const fileInput = document.getElementById('file-input');
+      const uploadBtn = document.getElementById('upload-btn');
+
+      function formatMarkdown(text) {
+        // Escape HTML to prevent XSS
+        const escaped = text
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;');
+
+        // Convert markdown bold **text** to <strong>text</strong>
+        // Also handle __text__ style
+        return escaped
+          .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+          .replace(/__(.+?)__/g, '<strong>$1</strong>')
+          .replace(/\*(.+?)\*/g, '<em>$1</em>')
+          .replace(/_(.+?)_/g, '<em>$1</em>')
+          .replace(/\n/g, '<br>');
+      }
+
+      function addMessage(content, type) {
+        const div = document.createElement('div');
+        div.className = `message ${type}`;
+        div.innerHTML = formatMarkdown(content);
+        messagesContainer.appendChild(div);
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        return div;
+      }
+
+      function showThinking() {
+        const div = document.createElement('div');
+        div.className = 'message thinking';
+        div.id = 'thinking-indicator';
+        div.innerHTML = `
+        <span>Thinking</span>
+        <div class="thinking-dots">
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+      `;
+        messagesContainer.appendChild(div);
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+      }
+
+      function hideThinking() {
+        const indicator = document.getElementById('thinking-indicator');
+        if (indicator) {
+          indicator.remove();
+        }
+      }
+
+      async function sendMessage() {
+        const message = messageInput.value.trim();
+        if (!message) return;
+
+        addMessage(message, 'user');
+        messageInput.value = '';
+        sendBtn.disabled = true;
+        showThinking();
+
+        try {
+          const response = await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message }),
+          });
+
+          const data = await response.json();
+          hideThinking();
+
+          if (response.ok) {
+            addMessage(data.response, 'assistant');
+          } else {
+            addMessage(`Error: ${data.error}`, 'system');
+          }
+        } catch (err) {
+          hideThinking();
+          addMessage('Failed to send message. Please try again.', 'system');
+        } finally {
+          sendBtn.disabled = false;
+          messageInput.focus();
+        }
+      }
+
+      async function uploadFile() {
+        const file = fileInput.files[0];
+        if (!file) {
+          addMessage('Please select a file first.', 'system');
+          return;
+        }
+
+        uploadBtn.disabled = true;
+        addMessage(`Uploading: ${file.name}...`, 'system');
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        try {
+          const response = await fetch('/api/upload', {
+            method: 'POST',
+            body: formData,
+          });
+
+          const data = await response.json();
+
+          if (response.ok) {
+            addMessage(
+              `Uploaded "${data.filename}" - ${data.chunkCount} chunks ingested.`,
+              'system'
+            );
+            fileInput.value = '';
+          } else {
+            addMessage(`Upload failed: ${data.error}`, 'system');
+          }
+        } catch (err) {
+          addMessage('Upload failed. Please try again.', 'system');
+        } finally {
+          uploadBtn.disabled = false;
+        }
+      }
+
+      // Event listeners
+      sendBtn.addEventListener('click', sendMessage);
+      uploadBtn.addEventListener('click', uploadFile);
+
+      messageInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          sendMessage();
+        }
+      });
+
+      // Focus input on load
+      messageInput.focus();
+    </script>
+  </body>
+</html>

@@ -40,7 +40,16 @@ export class DocumentStore {
     const k = trx ?? this.knex;
 
     const chunks = k('chunks')
-      .select(['id', 'document_id', 'chunk_index', 'content', 'token_count', 'metadata'])
+      .select([
+        'id',
+        'document_id',
+        'chunk_index',
+        'content',
+        'token_count',
+        'metadata',
+        'embedding',
+        'created_at',
+      ])
       .whereNotNull('embedding')
       .andWhere('user_id', '=', input.user_id)
       .orderByRaw('embedding <=> ?::vector', [

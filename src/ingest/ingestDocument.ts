@@ -39,7 +39,7 @@ export async function ingestDocument(
     );
 
     // 2) chunk
-    const rawChunks: RawChunk[] = DocumentUtil.chunkText(input.text);
+    const rawChunks: RawChunk[] = await DocumentUtil.chunkText(documentId, input.text);
 
     // 3) embed chunks (document mode) — do some concurrency but not insane
     const embeddedChunks = await mapLimit(rawChunks, 4, async (c) => {

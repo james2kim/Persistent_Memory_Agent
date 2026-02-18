@@ -34,7 +34,7 @@ export const MemoryUtil = {
   ): RawChunk[] {
     const MAX_TOKENS = opts?.maxTokensPerChunk ?? 1000;
     const OVERLAP_TOKENS = opts?.overlapTokens ?? 150;
-    const MAX_CHUNKS = opts?.maxChunks ?? 10_000; // ingestion default: “basically unlimited”
+    const MAX_CHUNKS = opts?.maxChunks ?? 10_000;
 
     const estTokens = (s: string) => this.estimateTokens(s);
     const overlapChars = OVERLAP_TOKENS * 4;
