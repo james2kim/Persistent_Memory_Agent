@@ -45,9 +45,9 @@ export async function ingestDocument(
     const embeddedChunks = await mapLimit(rawChunks, 4, async (c) => {
       const embedding = await defaultEmbedding.embedText(c.content, 'document');
       return {
-        chunkIndex: c.chunkIndex,
+        chunk_index: c.chunk_index,
         content: c.content,
-        tokenCount: c.tokenCount,
+        token_count: c.token_count,
         metadata: c.metadata ?? {},
         embedding,
       };

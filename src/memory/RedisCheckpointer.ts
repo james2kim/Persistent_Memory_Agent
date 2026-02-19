@@ -78,7 +78,6 @@ export class RedisCheckpointer extends BaseCheckpointSaver {
       taskState: (channelValues.taskState as SessionState['taskState']) ?? { attempts: 0 },
       updatedAt: new Date().toISOString(),
       summary: (channelValues.summary as string) ?? '',
-      tool_calls: channelValues.tool_calls as SessionState['tool_calls'],
       response: channelValues.response as SessionState['response'],
       sessionId: (channelValues.sessionId as string) ?? threadId,
       userId: (channelValues.userId as string) ?? '',

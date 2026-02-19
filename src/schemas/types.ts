@@ -1,10 +1,16 @@
 import { z } from 'zod/v4';
 import { StateSchema, MessagesValue } from '@langchain/langgraph';
 
+// ============================================================================
+// SCHEMAS
+// ============================================================================
+
+// --- Primitives ---
 export const isoDateString = z.string().refine((v) => !Number.isNaN(Date.parse(v)), {
   message: 'Invalid ISO date string',
 });
 
+// --- Memory Schemas ---
 export const memoryExtractionSchema = z.object({
   worth_keeping: z.boolean(),
   type: z.enum(['preference', 'goal', 'fact', 'decision', 'summary']),
@@ -12,26 +18,8 @@ export const memoryExtractionSchema = z.object({
   content: z.string().min(10).max(1000),
 });
 
-export type MemoryExtraction = z.infer<typeof memoryExtractionSchema>;
-
 export const memoryExtractionArraySchema = z.object({
   memories: z.array(memoryExtractionSchema),
-});
-
-export type MemoryExtractionArray = z.infer<typeof memoryExtractionArraySchema>;
-
-export const retrievalGateAssessmentSchema = z.object({
-  requiresExternalTruth: z.boolean(),
-  ambiguity: z.enum(['low', 'moderate', 'high']),
-  risk: z.enum(['low', 'moderate', 'high']),
-  notes: z.string().min(10).max(200),
-});
-
-export type RetrievalGateAssessment = z.infer<typeof retrievalGateAssessmentSchema>;
-
-export const summarizationSchema = z.object({
-  confidence: z.number().min(0).max(1),
-  content: z.string().min(50).max(1200),
 });
 
 export const memorySchema = z.object({
@@ -43,17 +31,6 @@ export const memorySchema = z.object({
   created_at: z.union([isoDateString, z.date()]),
 });
 
-export type Memory = z.infer<typeof memorySchema>;
-
-export const MessageSchema = z.object({
-  id: z.string(),
-  role: z.string(),
-  content: z.string(),
-  createdAt: isoDateString,
-});
-
-export type Message = z.infer<typeof MessageSchema>;
-
 export const searchMemoriesInputSchema = z.object({
   queryText: z.string(),
   options: z.object({
@@ -63,7 +40,6 @@ export const searchMemoriesInputSchema = z.object({
     allowedTypes: z.array(z.enum(['preference', 'goal', 'fact', 'decision', 'summary'])).optional(),
   }),
 });
-export type SearchMemoriesInput = z.infer<typeof searchMemoriesInputSchema>;
 
 export const searchMemoriesSuccessSchema = z.object({
   success: z.literal(true),
@@ -104,83 +80,26 @@ export const searchMemoriesFailureSchema = z.object({
   error_message: z.string().min(10).max(500),
 });
 
-export const SessionStateSchema = z.object({
-  messages: z.array(MessageSchema),
-  tool_calls: z
-    .array(
-      z.object({
-        id: z.string(),
-        name: z.string(),
-        args: z.record(z.string(), z.unknown()),
-      })
-    )
-    .optional(),
-  response: z.string().optional(),
-  taskState: z.object({
-    attempts: z.number(),
-  }),
-  updatedAt: isoDateString,
-  summary: z.string().max(1200),
-  sessionId: z.string(),
-  userId: z.string(),
-});
-
-export type SessionState = z.infer<typeof SessionStateSchema>;
-
-export const RedisOptionsSchema = z.object({
-  redisUrl: z.string(),
-  ttlSeconds: z.number(),
-  maxMessages: z.number(),
-  keyPrefix: z.string().optional(),
-});
-export type RedisOptions = z.infer<typeof RedisOptionsSchema>;
-
-export const AgentStateSchema = new StateSchema({
-  messages: MessagesValue,
-  tool_calls: z
-    .array(
-      z.object({
-        id: z.string(),
-        name: z.string(),
-        args: z.record(z.string(), z.unknown()),
-      })
-    )
-    .optional(),
-  response: z.string().optional(),
-
-  taskState: z.object({
-    attempts: z.number(),
-  }),
-  updatedAt: isoDateString,
-  summary: z.string().max(1200),
-  userQuery: z.string(),
-  sessionId: z.string(),
-  userId: z.string(),
-});
-export type AgentState = typeof AgentStateSchema.State;
-
-export type RawChunk = {
-  chunkIndex: number;
-  content: string;
-  tokenCount: number;
-  metadata?: Record<string, unknown>;
-};
-
-export interface RetrievedChunk extends RawChunk {
-  created_at: string;
-  embedding: number[];
-}
-
-export const IngestDocumentSchema = z.object({
-  source: z.string(),
+// --- Document/Chunk Schemas ---
+export const rawChunkSchema = z.object({
+  chunk_index: z.number(),
+  content: z.string(),
+  token_count: z.number(),
   metadata: z.record(z.string(), z.unknown()).optional(),
-  title: z.string(),
-  text: z.string(),
 });
 
-export type IngestDocument = z.infer<typeof IngestDocumentSchema>;
+export const retrievedChunkSchema = rawChunkSchema.extend({
+  id: z.string(),
+  document_id: z.string(),
+  created_at: z.string(),
+  embedding: z.array(z.number()),
+  distance: z.number(),
+});
 
-// Search Documents (RAG) schemas
+export const documentChunkSchema = retrievedChunkSchema.extend({
+  confidence: z.number().min(0).max(1),
+});
+
 export const searchDocumentsInputSchema = z.object({
   queryText: z.string().describe('The search query to find relevant document chunks'),
   options: z
@@ -189,17 +108,6 @@ export const searchDocumentsInputSchema = z.object({
     })
     .optional(),
 });
-export type SearchDocumentsInput = z.infer<typeof searchDocumentsInputSchema>;
-
-export const documentChunkSchema = z.object({
-  id: z.string(),
-  document_id: z.string(),
-  chunk_index: z.number(),
-  content: z.string(),
-  token_count: z.number(),
-  metadata: z.record(z.string(), z.unknown()).optional(),
-});
-export type DocumentChunk = z.infer<typeof documentChunkSchema>;
 
 export const searchDocumentsSuccessSchema = z.object({
   success: z.literal(true),
@@ -215,29 +123,54 @@ export const searchDocumentsFailureSchema = z.object({
   error_message: z.string(),
 });
 
-// Retrieval Gate Decision Schema
+export const IngestDocumentSchema = z.object({
+  source: z.string(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+  title: z.string(),
+  text: z.string(),
+});
+
+// --- Retrieval Gate Schemas ---
+export const retrievalGateAssessmentSchema = z.object({
+  queryType: z
+    .enum(['personal', 'study_content', 'general_knowledge', 'conversational'])
+    .describe(
+      'personal=about user, study_content=about uploaded materials, general_knowledge=common facts, conversational=greetings/chitchat'
+    ),
+  ambiguity: z.enum(['low', 'moderate', 'high']).describe('How clear is the query intent?'),
+  riskWithoutRetrieval: z
+    .enum(['low', 'moderate', 'high'])
+    .describe('Risk of incorrect/incomplete answer if we skip retrieval'),
+  referencesPersonalContext: z
+    .boolean()
+    .describe('Does query reference user goals, preferences, past decisions, or personal facts?'),
+  referencesUploadedContent: z
+    .boolean()
+    .describe('Does query reference documents, notes, papers, or study materials?'),
+  reasoning: z.string().min(10).max(200).describe('Brief explanation of the assessment'),
+});
+
 export const retrievalGateDecisionSchema = z.object({
   shouldRetrieveDocuments: z.boolean().describe('Whether to search the document corpus'),
   shouldRetrieveMemories: z.boolean().describe('Whether to search long-term memories'),
+  needsClarification: z
+    .boolean()
+    .describe('Whether the query is too ambiguous and needs clarification'),
   reasoning: z.string().max(200).describe('Brief explanation of the decision'),
 });
-export type RetrievalGateDecision = z.infer<typeof retrievalGateDecisionSchema>;
 
-// Retrieved Context Schema (stored in agent state)
 export const retrievedContextSchema = z.object({
   documents: z.array(documentChunkSchema).default([]),
   memories: z.array(memorySchema).default([]),
   gateDecision: retrievalGateDecisionSchema.optional(),
 });
-export type RetrievedContext = z.infer<typeof retrievedContextSchema>;
 
-// Knowledge Extraction Schema (for extractAndStoreKnowledge node)
+// --- Knowledge Extraction Schemas ---
 export const studyMaterialExtractionSchema = z.object({
   title: z.string().min(3).max(200).describe('A descriptive title for the study material'),
   content: z.string().min(20).describe('The study content to store'),
   subject: z.string().max(100).optional().describe('Subject area (e.g., Biology, History)'),
 });
-export type StudyMaterialExtraction = z.infer<typeof studyMaterialExtractionSchema>;
 
 export const knowledgeExtractionSchema = z.object({
   contentType: z
@@ -248,4 +181,93 @@ export const knowledgeExtractionSchema = z.object({
   studyMaterial: studyMaterialExtractionSchema.optional(),
   memories: z.array(memoryExtractionSchema).optional(),
 });
+
+// --- Summarization Schema ---
+export const summarizationSchema = z.object({
+  confidence: z.number().min(0).max(1),
+  content: z.string().min(50).max(2500),
+});
+
+// --- Message Schema ---
+export const MessageSchema = z.object({
+  id: z.string(),
+  role: z.string(),
+  content: z.string(),
+  createdAt: isoDateString,
+});
+
+// --- Session State Schema ---
+export const SessionStateSchema = z.object({
+  messages: z.array(MessageSchema),
+  response: z.string().optional(),
+  taskState: z.object({
+    attempts: z.number(),
+  }),
+  updatedAt: isoDateString,
+  summary: z.string().max(2500),
+  sessionId: z.string(),
+  userId: z.string(),
+});
+
+// --- Redis Options Schema ---
+export const RedisOptionsSchema = z.object({
+  redisUrl: z.string(),
+  ttlSeconds: z.number(),
+  maxMessages: z.number(),
+  keyPrefix: z.string().optional(),
+});
+
+// --- Agent State Schema ---
+export const AgentStateSchema = new StateSchema({
+  messages: MessagesValue,
+  response: z.string().optional(),
+  taskState: z.object({
+    attempts: z.number(),
+  }),
+  updatedAt: isoDateString,
+  summary: z.string().max(2500),
+  userQuery: z.string(),
+  sessionId: z.string(),
+  userId: z.string(),
+  gateDecision: retrievalGateDecisionSchema.optional(),
+  retrievedContext: z
+    .object({
+      documents: z.array(documentChunkSchema).default([]),
+      memories: z.array(memorySchema).default([]),
+    })
+    .optional(),
+});
+
+// ============================================================================
+// TYPES
+// ============================================================================
+
+// --- Memory Types ---
+export type MemoryExtraction = z.infer<typeof memoryExtractionSchema>;
+export type MemoryExtractionArray = z.infer<typeof memoryExtractionArraySchema>;
+export type Memory = z.infer<typeof memorySchema>;
+export type SearchMemoriesInput = z.infer<typeof searchMemoriesInputSchema>;
+
+// --- Document/Chunk Types ---
+export type RawChunk = z.infer<typeof rawChunkSchema>;
+export type RetrievedChunk = z.infer<typeof retrievedChunkSchema>;
+export type DocumentChunk = z.infer<typeof documentChunkSchema>;
+export type SearchDocumentsInput = z.infer<typeof searchDocumentsInputSchema>;
+export type IngestDocument = z.infer<typeof IngestDocumentSchema>;
+
+// --- Retrieval Gate Types ---
+export type RetrievalGateAssessment = z.infer<typeof retrievalGateAssessmentSchema>;
+export type RetrievalGateDecision = z.infer<typeof retrievalGateDecisionSchema>;
+export type RetrievedContext = z.infer<typeof retrievedContextSchema>;
+
+// --- Knowledge Extraction Types ---
+export type StudyMaterialExtraction = z.infer<typeof studyMaterialExtractionSchema>;
 export type KnowledgeExtraction = z.infer<typeof knowledgeExtractionSchema>;
+
+// --- Message Types ---
+export type Message = z.infer<typeof MessageSchema>;
+
+// --- Session/State Types ---
+export type SessionState = z.infer<typeof SessionStateSchema>;
+export type RedisOptions = z.infer<typeof RedisOptionsSchema>;
+export type AgentState = typeof AgentStateSchema.State;

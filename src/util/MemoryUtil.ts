@@ -48,9 +48,9 @@ export const MemoryUtil = {
       if (!trimmed) return;
 
       out.push({
-        chunkIndex: chunkIndex++,
+        chunk_index: chunkIndex++,
         content: trimmed,
-        tokenCount: estTokens(trimmed),
+        token_count: estTokens(trimmed),
       });
     };
 

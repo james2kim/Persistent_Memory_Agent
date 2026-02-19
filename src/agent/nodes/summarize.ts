@@ -17,7 +17,6 @@ export const summarizeMessages = async (state: AgentState) => {
   const safeCutIndex = findSafeCutIndex(state.messages, MAX_MESSAGES / 2);
   const messagesToSummarize = state.messages.slice(0, safeCutIndex);
   const summarization = await summarize(state.summary, messagesToSummarize);
-  console.log('NODE4', summarization);
 
   const removeMessages = messagesToSummarize.map(
     (msg) => new RemoveMessage({ id: msg.id as string })

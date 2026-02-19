@@ -38,6 +38,7 @@ export class DocumentStore {
     trx?: Knex.Transaction
   ) {
     const k = trx ?? this.knex;
+    const vectorLiteral = EmbeddingUtil.toPgVectorLiteral(input.queryEmbedding);
 
     const chunks = k('chunks')
       .select([
@@ -50,11 +51,10 @@ export class DocumentStore {
         'embedding',
         'created_at',
       ])
+      .select(k.raw('(embedding <=> ?::vector) AS distance', [vectorLiteral]))
       .whereNotNull('embedding')
       .andWhere('user_id', '=', input.user_id)
-      .orderByRaw('embedding <=> ?::vector', [
-        EmbeddingUtil.toPgVectorLiteral(input.queryEmbedding),
-      ])
+      .orderByRaw('embedding <=> ?::vector', [vectorLiteral])
       .limit(input.topK);
 
     return await chunks;
@@ -65,9 +65,9 @@ export class DocumentStore {
       user_id: string;
       documentId: string;
       chunks: Array<{
-        chunkIndex: number;
+        chunk_index: number;
         content: string;
-        tokenCount: number;
+        token_count: number;
         embedding: number[];
         metadata?: Record<string, unknown>;
       }>;
@@ -79,9 +79,9 @@ export class DocumentStore {
     const rows = input.chunks.map((chunk) => ({
       document_id: input.documentId,
       user_id: input.user_id,
-      chunk_index: chunk.chunkIndex,
+      chunk_index: chunk.chunk_index,
       content: chunk.content,
-      token_count: chunk.tokenCount,
+      token_count: chunk.token_count,
       metadata: chunk.metadata ?? {},
       embedding: k.raw('?::vector', [EmbeddingUtil.toPgVectorLiteral(chunk.embedding)]),
       updated_at: k.fn.now(),

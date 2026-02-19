@@ -8,9 +8,14 @@ const DEFAULT_BUDGET = {
   maxChunks: 8,
   maxPerDoc: 2,
   maxChunkTokens: 700,
-} as const;
+};
 
-export type BudgetOptions = Partial<typeof DEFAULT_BUDGET>;
+export type BudgetOptions = {
+  maxContextTokens?: number;
+  maxChunks?: number;
+  maxPerDoc?: number;
+  maxChunkTokens?: number;
+};
 
 export const DocumentUtil = {
   estimateTokens(text: string) {
@@ -76,11 +81,10 @@ export const DocumentUtil = {
 
     return chunks
       .map((content, index) => ({
-        chunkIndex: index,
+        chunk_index: index,
         content: content.trim(),
-        tokenCount: Math.ceil(content.length / 4),
-        documentId,
-        metadata: {}, // later: sectionTitle, headingPath, page, etc.
+        token_count: Math.ceil(content.length / 4),
+        metadata: {},
       }))
       .filter((c) => c.content.length > 0);
   },
@@ -166,7 +170,18 @@ export const DocumentUtil = {
 
     return selected;
   },
+  calculateMinDAndRange(chunks: DocumentChunk[]) {
+    // Confidence is computed by calculating which chunk has the smallest cosine distance from the embedded query
+    const distances = chunks.map((c) => c.distance);
+    const minD = Math.min(...distances);
+    const maxD = Math.max(...distances);
+    const range = Math.max(1e-9, maxD - minD);
 
+    return {
+      range,
+      minD,
+    };
+  },
   /**
    * Retrieve relevant chunks from the document store.
    *
@@ -193,39 +208,51 @@ export const DocumentUtil = {
       user_id: input.user_id,
       topK,
     });
+    console.log(rawChunks);
 
     if (rawChunks.length === 0) {
       return [];
     }
 
-    // Convert to extended format that carries all needed data
-    type ExtendedChunk = RetrievedChunk & { id: string; document_id: string };
+    // Extended type to carry distance through pipeline
+    type ChunkWithDistance = RetrievedChunk & { distance: number };
 
-    const extendedChunks: ExtendedChunk[] = rawChunks.map((chunk) => ({
+    // Confidence is computed by calculating which chunk has the smallest cosine distance from the embedded query
+    const distances = rawChunks.map((c) => c.distance);
+    const minD = Math.min(...distances);
+    const maxD = Math.max(...distances);
+    const range = Math.max(1e-9, maxD - minD);
+
+    const extendedChunks: ChunkWithDistance[] = rawChunks.map((chunk) => ({
       id: chunk.id,
       document_id: chunk.document_id,
-      chunkIndex: chunk.chunk_index,
+      chunk_index: chunk.chunk_index,
       content: chunk.content,
-      tokenCount: chunk.token_count,
+      token_count: chunk.token_count,
       metadata: chunk.metadata,
       created_at: chunk.created_at,
       embedding: chunk.embedding,
+      distance: chunk.distance,
     }));
 
     // 2. Filter by relevance rules
     const relevant = extendedChunks.filter((chunk) => this.passRelevanceRules(chunk));
 
-    // 3. Remove near-duplicates
-    const deduped = this.removeDuplicateChunks(relevant as RetrievedChunk[]) as ExtendedChunk[];
+    // 3. Remove near-duplicates (cast to RetrievedChunk for the function, then back)
+    const deduped = this.removeDuplicateChunks(relevant) as ChunkWithDistance[];
 
     // 4. Convert to DocumentChunk format for budget application
     const documentChunks: DocumentChunk[] = deduped.map((chunk) => ({
       id: chunk.id,
       document_id: chunk.document_id,
-      chunk_index: chunk.chunkIndex,
+      chunk_index: chunk.chunk_index,
       content: chunk.content,
-      token_count: chunk.tokenCount,
+      token_count: chunk.token_count,
       metadata: chunk.metadata,
+      created_at: chunk.created_at,
+      embedding: chunk.embedding,
+      distance: chunk.distance,
+      confidence: 1 - (chunk.distance - minD) / range,
     }));
 
     // 5. Apply budget constraints

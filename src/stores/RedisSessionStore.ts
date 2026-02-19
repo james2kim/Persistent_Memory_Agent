@@ -154,6 +154,6 @@ export class RedisSessionStoreClass {
 export const RedisSessionStore = new RedisSessionStoreClass({
   redisUrl: process.env.REDIS_URL ?? '',
   maxMessages: 50,
-  ttl: 3600,
+  ttl: 7200,
   keyPrefix: 'session:',
 });

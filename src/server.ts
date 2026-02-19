@@ -225,9 +225,72 @@ app.get('/api/session', async (req, res) => {
   try {
     const { state } = await RedisSessionStore.getSession(sessionId, userId);
 
+    console.log('[/api/session] Session ID:', sessionId);
+    console.log('[/api/session] Raw state keys:', Object.keys(state));
+    console.log('[/api/session] Raw messages count:', state.messages?.length ?? 0);
+    console.log(
+      '[/api/session] Raw messages sample:',
+      JSON.stringify(state.messages?.[0], null, 2)
+    );
+
+    // Also check the checkpointer directly
+    const checkpointKey = `checkpoint:${sessionId}:latest`;
+    const checkpointRaw = await RedisSessionStore.getClient().get(checkpointKey);
+    if (checkpointRaw) {
+      const checkpoint = JSON.parse(checkpointRaw);
+      const cpMessages = checkpoint?.checkpoint?.channel_values?.messages;
+      console.log('[/api/session] Checkpoint messages count:', cpMessages?.length ?? 0);
+      console.log(
+        '[/api/session] Checkpoint message sample:',
+        JSON.stringify(cpMessages?.[0], null, 2)
+      );
+    } else {
+      console.log('[/api/session] No checkpoint found for key:', checkpointKey);
+    }
+
+    // Normalize LangChain messages to plain objects
+    const normalizedMessages = (state.messages || [])
+      .map((msg: unknown) => {
+        const m = msg as Record<string, unknown>;
+
+        // LangChain serialized format:
+        // { id: ["langchain_core", "messages", "HumanMessage"], kwargs: { content: "..." } }
+        const msgId = m.id as string[] | undefined;
+        const kwargs = m.kwargs as Record<string, unknown> | undefined;
+        const msgType = msgId?.[2]?.toLowerCase() || '';
+
+        // Determine role
+        let role = 'system';
+        if (msgType.includes('human')) {
+          role = 'user';
+        } else if (msgType.includes('ai')) {
+          role = 'assistant';
+        } else if (msgType.includes('tool')) {
+          role = 'system'; // Skip tool messages or show as system
+        }
+
+        // Extract content from kwargs
+        let content = kwargs?.content ?? m.content ?? '';
+        if (Array.isArray(content)) {
+          content = content
+            .map((c: unknown) =>
+              typeof c === 'string' ? c : (c as Record<string, unknown>).text || ''
+            )
+            .join('');
+        }
+
+        return { role, content: String(content) };
+      })
+      .filter(
+        (m: { content: string; role: string }) =>
+          m.content && m.content.trim().length > 0 && m.role !== 'system'
+      );
+
+    console.log('[/api/session] Normalized messages count:', normalizedMessages.length);
+
     res.json({
       sessionId,
-      messages: state.messages,
+      messages: normalizedMessages,
     });
   } catch (err) {
     console.error('Error in /api/session:', err);
