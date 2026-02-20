@@ -8,6 +8,7 @@ const DEFAULT_BUDGET = {
   maxChunks: 8,
   maxPerDoc: 2,
   maxChunkTokens: 700,
+  minConfidence: 0.6,
 };
 
 export type BudgetOptions = {
@@ -15,6 +16,7 @@ export type BudgetOptions = {
   maxChunks?: number;
   maxPerDoc?: number;
   maxChunkTokens?: number;
+  minConfidence?: number;
 };
 
 export const DocumentUtil = {
@@ -255,7 +257,11 @@ export const DocumentUtil = {
       confidence: 1 - (chunk.distance - minD) / range,
     }));
 
+    const confidentDocumentChunks = documentChunks.filter(
+      (chunk) => chunk.confidence >= (budgetOptions?.minConfidence ?? 0.6)
+    );
+
     // 5. Apply budget constraints
-    return this.applyBudget(documentChunks, budgetOptions);
+    return this.applyBudget(confidentDocumentChunks, budgetOptions);
   },
 };

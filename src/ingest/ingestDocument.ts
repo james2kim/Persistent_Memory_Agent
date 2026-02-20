@@ -27,7 +27,6 @@ export async function ingestDocument(
   user_id: string
 ): Promise<{ documentId: string; chunkCount: number }> {
   return await knex.transaction(async (trx) => {
-    // 1) upsert document row
     const { id: documentId } = await stores.documents.upsertDocument(
       {
         source: input.source,
@@ -38,10 +37,8 @@ export async function ingestDocument(
       trx
     );
 
-    // 2) chunk
     const rawChunks: RawChunk[] = await DocumentUtil.chunkText(documentId, input.text);
 
-    // 3) embed chunks (document mode) — do some concurrency but not insane
     const embeddedChunks = await mapLimit(rawChunks, 4, async (c) => {
       const embedding = await defaultEmbedding.embedText(c.content, 'document');
       return {

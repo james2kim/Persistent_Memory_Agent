@@ -345,6 +345,7 @@
 
       function formatMarkdown(text) {
         // Store code blocks temporarily to prevent processing their contents
+        // Using %%% delimiters with no underscores to avoid markdown pattern conflicts
         const codeBlocks = [];
         let processed = text;
 
@@ -354,7 +355,7 @@
             .replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;');
-          const placeholder = `__CODE_BLOCK_${codeBlocks.length}__`;
+          const placeholder = `%%%CODEBLOCK${codeBlocks.length}%%%`;
           codeBlocks.push(`<pre><code>${escaped.trim()}</code></pre>`);
           return placeholder;
         });
@@ -366,7 +367,7 @@
             .replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;');
-          const placeholder = `__INLINE_CODE_${inlineCodes.length}__`;
+          const placeholder = `%%%INLINECODE${inlineCodes.length}%%%`;
           inlineCodes.push(`<code>${escaped}</code>`);
           return placeholder;
         });
@@ -417,15 +418,13 @@
         processed = processed.replace(/(<\/pre>)<br>/g, '$1');
         processed = processed.replace(/(<hr>)<br>/g, '$1');
 
-        // Restore code blocks
-        codeBlocks.forEach((block, i) => {
-          processed = processed.replace(`__CODE_BLOCK_${i}__`, block);
-        });
-
-        // Restore inline code
-        inlineCodes.forEach((code, i) => {
-          processed = processed.replace(`__INLINE_CODE_${i}__`, code);
-        });
+        // Restore code blocks and inline code using regex for reliability
+        for (let i = 0; i < codeBlocks.length; i++) {
+          processed = processed.split(`%%%CODEBLOCK${i}%%%`).join(codeBlocks[i]);
+        }
+        for (let i = 0; i < inlineCodes.length; i++) {
+          processed = processed.split(`%%%INLINECODE${i}%%%`).join(inlineCodes[i]);
+        }
 
         return processed;
       }
