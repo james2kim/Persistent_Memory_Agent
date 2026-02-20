@@ -1,5 +1,5 @@
 import { RedisSessionStore } from '../stores/RedisSessionStore';
-import { summarize } from '../memory/summarizeMessages';
+import { summarize } from '../llm/summarizeMessages';
 import { MAX_MESSAGES } from './constants';
 import type { BaseMessage } from '@langchain/core/messages';
 
@@ -15,14 +15,18 @@ export async function runBackgroundSummarization(
 ): Promise<void> {
   try {
     console.log(`[backgroundSummarization] Starting for session ${sessionId}`);
-    console.log(`[backgroundSummarization] Messages: ${messages.length}, Summary length: ${currentSummary.length}`);
+    console.log(
+      `[backgroundSummarization] Messages: ${messages.length}, Summary length: ${currentSummary.length}`
+    );
 
     // Determine how many messages to summarize (first half)
     const cutIndex = Math.floor(MAX_MESSAGES / 2);
     const messagesToSummarize = messages.slice(0, cutIndex);
     const messagesToKeep = messages.slice(cutIndex);
 
-    console.log(`[backgroundSummarization] Summarizing ${messagesToSummarize.length} messages, keeping ${messagesToKeep.length}`);
+    console.log(
+      `[backgroundSummarization] Summarizing ${messagesToSummarize.length} messages, keeping ${messagesToKeep.length}`
+    );
 
     // Run summarization
     const result = await summarize(currentSummary, messagesToSummarize);
