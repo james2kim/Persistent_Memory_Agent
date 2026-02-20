@@ -1,5 +1,5 @@
 import type { AgentState } from '../../schemas/types';
-import { model } from '../constants';
+import { haikuModel } from '../constants';
 
 const CLARIFICATION_SYSTEM_MESSAGE = `You are a Study Assistant Agent. The user asked something that is outside your core domain or requires clarification.
 
@@ -16,7 +16,7 @@ Examples:
 - "That's outside my wheelhouse. Anything study-related I can help with?"`;
 
 export const clarificationResponse = async (state: AgentState) => {
-  const aiMessage = await model.invoke([
+  const aiMessage = await haikuModel.invoke([
     { role: 'system', content: CLARIFICATION_SYSTEM_MESSAGE },
     { role: 'user', content: state.userQuery },
   ]);

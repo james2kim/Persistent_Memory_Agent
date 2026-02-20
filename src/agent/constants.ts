@@ -27,6 +27,34 @@ Your job is to help the user learn and keep organized notes/plans over time.
 - **Simple factual questions are fine.** You can answer general knowledge questions (math, facts) directly—no need to refuse.
 - **When in doubt, be helpful but brief.** One good sentence beats five mediocre ones.`;
 
+/**
+ * Distributes items in a U-shape pattern for optimal LLM attention.
+ * Based on "Lost in the Middle" research: LLMs attend most to beginning and end.
+ *
+ * Input (sorted by relevance): [1, 2, 3, 4, 5, 6]
+ * Output (U-shape):            [1, 3, 5, 6, 4, 2]
+ *
+ * - Most relevant (1) at front (high attention)
+ * - Second most relevant (2) at back (high attention)
+ * - Least relevant items in the middle (low attention)
+ */
+const distributeUShape = <T>(items: T[]): T[] => {
+  if (items.length <= 2) return items;
+
+  const front: T[] = [];
+  const back: T[] = [];
+
+  items.forEach((item, i) => {
+    if (i % 2 === 0) {
+      front.push(item); // 0, 2, 4... → front
+    } else {
+      back.unshift(item); // 1, 3, 5... → back (reversed)
+    }
+  });
+
+  return [...front, ...back];
+};
+
 export const buildContextBlock = (
   documents: DocumentChunk[],
   memories: Memory[]
@@ -34,12 +62,16 @@ export const buildContextBlock = (
   const sections: string[] = [];
 
   if (memories.length > 0) {
-    const memoryContext = memories.map((m) => `- [${m.type}] ${m.content}`).join('\n');
+    // Apply U-shape distribution to memories
+    const distributedMemories = distributeUShape(memories);
+    const memoryContext = distributedMemories.map((m) => `- [${m.type}] ${m.content}`).join('\n');
     sections.push(`## User Context (from memory)\n${memoryContext}`);
   }
 
   if (documents.length > 0) {
-    const docContext = documents
+    // Apply U-shape distribution to document chunks
+    const distributedDocs = distributeUShape(documents);
+    const docContext = distributedDocs
       .map(
         (d) =>
           `[Doc ${d.document_id}, chunk ${d.chunk_index}] (confidence: ${d.confidence?.toFixed(2) ?? 'N/A'})\n${d.content}`
@@ -55,7 +87,12 @@ export const buildContextBlock = (
   return `<context>\n${sections.join('\n\n')}\n</context>`;
 };
 
-export const model = new ChatAnthropic({
+export const haikuModel = new ChatAnthropic({
+  model: 'claude-3-haiku-20240307',
+  apiKey: process.env.ANTHROPIC_API_KEY,
+});
+
+export const sonnetModel = new ChatAnthropic({
   model: 'claude-sonnet-4-5-20250929',
   apiKey: process.env.ANTHROPIC_API_KEY,
 });

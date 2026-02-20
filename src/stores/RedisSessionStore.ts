@@ -1,21 +1,24 @@
 import { createClient, RedisClientType } from 'redis';
-import type { SessionState, Message } from '../schemas/types';
+import type { SessionState } from '../schemas/types';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
 dotenv.config({ path: '.env.local' });
 
+/**
+ * RedisSessionStore - Manages session IDs and provides a read view for the UI.
+ *
+ * Note: The primary state manager is RedisCheckpointer (used by LangGraph).
+ * This store is synced by the checkpointer and read by the API for UI display.
+ */
 export class RedisSessionStoreClass {
   private client: RedisClientType;
-  private maxMessages: number;
   private ttl: number;
   private keyPrefix: string;
-  private summary: string | undefined;
-  constructor(opts: { redisUrl: string; maxMessages: number; ttl: number; keyPrefix: string }) {
+
+  constructor(opts: { redisUrl: string; ttl: number; keyPrefix?: string }) {
     this.client = createClient({ url: opts.redisUrl });
-    this.maxMessages = opts.maxMessages;
     this.ttl = opts.ttl;
     this.keyPrefix = opts.keyPrefix ?? 'session:';
-    this.summary = '';
 
     this.client.on('error', (err) => {
       console.log('Redis Client Error', err);
@@ -110,21 +113,6 @@ export class RedisSessionStoreClass {
     };
   }
 
-  async appendMessage(sessionId: string, userId: string, message: Message) {
-    const { state } = await this.getSession(sessionId, userId);
-    const newState = {
-      ...state,
-      messages: [...state.messages, message],
-      updatedAt: new Date().toISOString(),
-    };
-    await this.writeSession(sessionId, newState);
-    return newState;
-  }
-
-  async getTtl(sessionId: string) {
-    return await this.client.ttl(this.key(sessionId));
-  }
-
   async getActiveSessionId(userId: string): Promise<string | null> {
     return await this.client.get(`user:${userId}:active_session`);
   }
@@ -153,7 +141,6 @@ export class RedisSessionStoreClass {
 
 export const RedisSessionStore = new RedisSessionStoreClass({
   redisUrl: process.env.REDIS_URL ?? '',
-  maxMessages: 50,
-  ttl: 7200,
+  ttl: 86400,
   keyPrefix: 'session:',
 });

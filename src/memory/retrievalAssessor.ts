@@ -1,17 +1,12 @@
 import dotenv from 'dotenv';
 dotenv.config({ path: '.env.local' });
-import { ChatAnthropic } from '@langchain/anthropic';
 
 import {
   RetrievalGateAssessment,
   RetrievalGateDecision,
   retrievalGateAssessmentSchema,
 } from '../schemas/types';
-
-const model = new ChatAnthropic({
-  model: 'claude-sonnet-4-5-20250929',
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
+import { haikuModel } from '../agent/constants';
 
 const SYSTEM_MESSAGE = `You are a query assessor for a study assistant. Analyze the user query and provide a structured assessment. Do NOT decide what to retrieve—just describe the query characteristics.
 
@@ -70,7 +65,7 @@ Query: "What is the capital of France?"
 → referencesPersonalContext: false, referencesUploadedContent: false
 → reasoning: "General fact, no retrieval needed"`;
 
-const modelWithAssessmentSchema = model.withStructuredOutput(retrievalGateAssessmentSchema);
+const modelWithAssessmentSchema = haikuModel.withStructuredOutput(retrievalGateAssessmentSchema);
 
 /**
  * LLM-based query assessment. Analyzes the query but does NOT decide retrieval.

@@ -17,6 +17,8 @@ import { buildWorkflow } from './agent/graph';
 import { ingestDocument } from './ingest/ingestDocument';
 import { DocumentStore } from './stores/DocumentStore';
 import { db } from './db/knex';
+import { runBackgroundSummarization } from './agent/backgroundTasks';
+import { MAX_MESSAGES } from './agent/constants';
 
 // Supported file types
 const SUPPORTED_EXTENSIONS = ['.pdf', '.docx', '.doc', '.md', '.txt'];
@@ -155,10 +157,22 @@ app.post('/api/chat', async (req, res) => {
 
     const result = await getFormattedAnswerToUserinput(message);
 
+    // Send response immediately
     res.json({
       response: result?.response ?? '[No response generated]',
       sessionId,
     });
+
+    // Run background summarization if needed (fire and forget)
+    if (result?.messages && result.messages.length >= MAX_MESSAGES) {
+      console.log(`[/api/chat] Triggering background summarization (${result.messages.length} messages)`);
+      runBackgroundSummarization(
+        sessionId,
+        userId,
+        result.messages,
+        result.summary ?? ''
+      ).catch((err) => console.error('[/api/chat] Background summarization error:', err));
+    }
   } catch (err) {
     console.error('Error in /api/chat:', err);
     res.status(500).json({ error: 'Failed to process message' });

@@ -15,6 +15,12 @@ export const extractAndStoreKnowledge = async (state: AgentState) => {
   // Classify and extract knowledge from user query
   const extraction = await extractKnowledge(state.userQuery);
 
+  // Handle extraction failure gracefully
+  if (!extraction) {
+    console.log('[Knowledge] Extraction failed, skipping');
+    return {};
+  }
+
   console.log(`[Knowledge] Classified as: ${extraction.contentType}`);
 
   if (extraction.contentType === 'study_material' && extraction.studyMaterial) {

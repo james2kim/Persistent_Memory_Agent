@@ -1,16 +1,11 @@
 import dotenv from 'dotenv';
 dotenv.config({ path: '.env.local' });
-import { ChatAnthropic } from '@langchain/anthropic';
 import type { BaseMessage } from '@langchain/core/messages';
 import { z } from 'zod/v4';
+import { sonnetModel } from '../agent/constants';
 
 const MAX_SUMMARY_CHARS = 2500;
 const COMPRESSION_THRESHOLD = 2400; // Start compressing before hitting hard limit
-
-const model = new ChatAnthropic({
-  model: 'claude-sonnet-4-5-20250929',
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
 
 // Relaxed schema for initial summarization (allows overflow)
 const relaxedSummarizationSchema = z.object({
@@ -40,7 +35,7 @@ Rules:
 
 Output your confidence (0-1) based on how much essential information was present in the combined summary.`;
 
-const modelWithRelaxedSchema = model.withStructuredOutput(relaxedSummarizationSchema);
+const modelWithRelaxedSchema = sonnetModel.withStructuredOutput(relaxedSummarizationSchema);
 
 const COMPRESS_SUMMARY_PROMPT = `You are a summary compressor. Your task is to condense the given summary while preserving ALL critical information.
 
@@ -57,13 +52,13 @@ Rules:
 
 Output ONLY the compressed summary text, nothing else.`;
 
-async function compressSummary(content: string, maxAttempts = 3): Promise<string> {
+async function compressSummary(content: string, maxAttempts = 1): Promise<string> {
   let current = content;
   let attempts = 0;
 
   while (current.length > COMPRESSION_THRESHOLD && attempts < maxAttempts) {
     attempts++;
-    const response = await model.invoke([
+    const response = await sonnetModel.invoke([
       {
         role: 'system',
         content: COMPRESS_SUMMARY_PROMPT.replace('{{LENGTH}}', String(current.length)),
@@ -71,9 +66,8 @@ async function compressSummary(content: string, maxAttempts = 3): Promise<string
       { role: 'user', content: current },
     ]);
 
-    const compressed = typeof response.content === 'string'
-      ? response.content
-      : JSON.stringify(response.content);
+    const compressed =
+      typeof response.content === 'string' ? response.content : JSON.stringify(response.content);
 
     // If compression didn't help, break to avoid infinite loop
     if (compressed.length >= current.length) {
@@ -124,7 +118,9 @@ export const summarize = async (existingSummary: string, messages: BaseMessage[]
   // Compress if summary exceeds threshold
   let finalContent = response.content;
   if (finalContent.length > COMPRESSION_THRESHOLD) {
-    console.log(`[summarize] Summary exceeds threshold (${finalContent.length} chars), compressing...`);
+    console.log(
+      `[summarize] Summary exceeds threshold (${finalContent.length} chars), compressing...`
+    );
     finalContent = await compressSummary(finalContent);
     console.log(`[summarize] Compressed to ${finalContent.length} chars`);
   }

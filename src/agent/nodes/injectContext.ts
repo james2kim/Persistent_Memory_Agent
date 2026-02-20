@@ -1,5 +1,5 @@
 import type { AgentState } from '../../schemas/types';
-import { SYSTEM_MESSAGE, buildContextBlock, model } from '../constants';
+import { SYSTEM_MESSAGE, buildContextBlock, sonnetModel } from '../constants';
 
 export const injectContext = async (state: AgentState) => {
   const documents = state.retrievedContext?.documents ?? [];
@@ -20,7 +20,7 @@ export const injectContext = async (state: AgentState) => {
 
   const previousMessages = state.messages.slice(0, -1);
 
-  const aiMessage = await model.invoke([
+  const aiMessage = await sonnetModel.invoke([
     { role: 'system', content: SYSTEM_MESSAGE },
     ...previousMessages,
     { role: 'user', content: userContent },

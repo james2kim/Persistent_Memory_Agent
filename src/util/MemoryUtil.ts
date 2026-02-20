@@ -199,6 +199,7 @@ export const MemoryUtil = {
       maxTokens?: number;
       minConfidence?: number;
       allowedTypes?: Memory['type'][];
+      queryEmbedding?: number[]; // Pre-computed embedding to avoid duplicate API calls
     }
   ): Promise<SearchMemoriesResult> {
     const baseFailure = {
@@ -213,23 +214,25 @@ export const MemoryUtil = {
       },
     };
 
-    // Step 1: Get query embedding
-    let queryEmbedding: number[] | undefined;
-    try {
-      queryEmbedding = await defaultEmbedding.embedText(queryText, 'query');
-      if (!queryEmbedding) {
+    // Use pre-computed embedding if provided, otherwise generate
+    let queryEmbedding: number[] | undefined = options.queryEmbedding;
+    if (!queryEmbedding) {
+      try {
+        queryEmbedding = await defaultEmbedding.embedText(queryText, 'query');
+        if (!queryEmbedding) {
+          return searchMemoriesFailureSchema.parse({
+            ...baseFailure,
+            error_type: 'embedding_error',
+            error_message: 'Failed to generate embedding for query text',
+          });
+        }
+      } catch (err) {
         return searchMemoriesFailureSchema.parse({
           ...baseFailure,
           error_type: 'embedding_error',
-          error_message: 'Failed to generate embedding for query text',
+          error_message: err instanceof Error ? err.message : 'Unknown embedding error',
         });
       }
-    } catch (err) {
-      return searchMemoriesFailureSchema.parse({
-        ...baseFailure,
-        error_type: 'embedding_error',
-        error_message: err instanceof Error ? err.message : 'Unknown embedding error',
-      });
     }
 
     // Step 3: Filter, score, and rank

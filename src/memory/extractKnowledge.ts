@@ -1,13 +1,8 @@
 import dotenv from 'dotenv';
 dotenv.config({ path: '.env.local' });
-import { ChatAnthropic } from '@langchain/anthropic';
+import { sonnetModel } from '../agent/constants';
 
 import { knowledgeExtractionSchema, type KnowledgeExtraction } from '../schemas/types';
-
-const model = new ChatAnthropic({
-  model: 'claude-sonnet-4-5-20250929',
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
 
 const KNOWLEDGE_EXTRACTION_PROMPT = `You are a knowledge classification and extraction module inside a persistent memory system. Your job is to analyze user input and determine what type of content it is and how it should be stored.
 
@@ -57,12 +52,19 @@ Conversational content that doesn't need to be stored:
 - When in doubt between study_material and personal_memory, ask: "Is this content the user wants to reference/learn, or is it about the user themselves?"
 - Be conservative with personal_memory extraction - only extract what's clearly about the user.`;
 
-const modelWithKnowledgeStructure = model.withStructuredOutput(knowledgeExtractionSchema);
+const modelWithKnowledgeStructure = sonnetModel.withStructuredOutput(knowledgeExtractionSchema);
 
-export const extractKnowledge = async (input: string): Promise<KnowledgeExtraction> => {
-  const response = await modelWithKnowledgeStructure.invoke([
-    { role: 'system', content: KNOWLEDGE_EXTRACTION_PROMPT },
-    { role: 'user', content: input },
-  ]);
-  return response;
+export const extractKnowledge = async (input: string): Promise<KnowledgeExtraction | null> => {
+  try {
+    const response = await modelWithKnowledgeStructure.invoke([
+      { role: 'system', content: KNOWLEDGE_EXTRACTION_PROMPT },
+      { role: 'user', content: input },
+    ]);
+    return response;
+  } catch (err) {
+    // Haiku sometimes struggles with nested structured outputs
+    // Log and return null rather than crashing
+    console.warn('[extractKnowledge] Failed to parse extraction, skipping:', err instanceof Error ? err.message : err);
+    return null;
+  }
 };
