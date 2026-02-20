@@ -8,10 +8,13 @@ import { getUserId } from '../../config';
 const documentStore = new DocumentStore(db, 1024);
 
 export const retrieveMemoriesAndChunks = async (state: AgentState) => {
+  console.log(`[retrieveMemoriesAndChunks] Starting retrieval`);
   const decision = state.gateDecision;
   const query = state.userQuery;
   const userId = getUserId();
   const queryEmbedding = state.queryEmbedding; // Pre-computed in retrievalGate
+
+  console.log(`[retrieveMemoriesAndChunks] Decision: docs=${decision?.shouldRetrieveDocuments}, mems=${decision?.shouldRetrieveMemories}`);
 
   if (!queryEmbedding) {
     console.log('[retrieveMemoriesAndChunks] No embedding available, skipping retrieval');
@@ -69,6 +72,8 @@ export const retrieveMemoriesAndChunks = async (state: AgentState) => {
 
   // Run all retrieval tasks in parallel
   await Promise.all(retrievalTasks);
+
+  console.log(`[retrieveMemoriesAndChunks] Retrieved ${documents.length} docs, ${memories.length} memories`);
 
   return {
     retrievedContext: {

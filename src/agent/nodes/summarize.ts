@@ -1,6 +1,6 @@
 import { RemoveMessage } from '@langchain/core/messages';
 import type { AgentState } from '../../schemas/types';
-import { summarize } from '../../memory/summarizeMessages';
+import { summarize } from '../../llm/summarizeMessages';
 import { MAX_MESSAGES } from '../constants';
 
 const findSafeCutIndex = (messages: AgentState['messages'], targetCount: number): number => {

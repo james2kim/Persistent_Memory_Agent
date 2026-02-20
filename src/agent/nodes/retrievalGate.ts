@@ -1,9 +1,11 @@
 import type { AgentState } from '../../schemas/types';
-import { retrievalGateAssessor, retrievalGatePolicy } from '../../memory/retrievalAssessor';
+import { retrievalGateAssessor, retrievalGatePolicy } from '../../llm/retrievalAssessor';
+
 import { defaultEmbedding } from '../../services/EmbeddingService';
 
 export const retrievalGate = async (state: AgentState) => {
   const query = state.userQuery;
+  console.log(`[retrievalGate] Query: "${query}"`);
 
   // Run LLM assessment and embedding generation in parallel
   // Both only need the query, neither depends on the other
@@ -12,8 +14,13 @@ export const retrievalGate = async (state: AgentState) => {
     defaultEmbedding.embedText(query, 'query'),
   ]);
 
+  console.log(`[retrievalGate] Assessment:`, JSON.stringify(assessment, null, 2));
+
   // Policy decides what to retrieve based on assessment
   const decision = retrievalGatePolicy(assessment);
+  console.log(
+    `[retrievalGate] Decision: docs=${decision.shouldRetrieveDocuments}, mems=${decision.shouldRetrieveMemories}, clarify=${decision.needsClarification}`
+  );
 
   return {
     gateDecision: decision,

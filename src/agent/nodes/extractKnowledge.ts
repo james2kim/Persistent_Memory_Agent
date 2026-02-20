@@ -1,5 +1,5 @@
 import type { AgentState } from '../../schemas/types';
-import { extractKnowledge } from '../../memory/extractKnowledge';
+import { extractKnowledge } from '../../llm/extractKnowledge';
 import { MemoryStore } from '../../stores/MemoryStore';
 import { DocumentStore } from '../../stores/DocumentStore';
 import { getUserId } from '../../config';
@@ -44,9 +44,7 @@ export const extractAndStoreKnowledge = async (state: AgentState) => {
         userId
       );
 
-      console.log(
-        `[Knowledge] Ingested study material: "${title}" (${result.chunkCount} chunks)`
-      );
+      console.log(`[Knowledge] Ingested study material: "${title}" (${result.chunkCount} chunks)`);
     } catch (err) {
       console.error('[Knowledge] Failed to ingest study material:', err);
     }

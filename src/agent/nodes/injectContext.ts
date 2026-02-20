@@ -1,11 +1,17 @@
 import type { AgentState } from '../../schemas/types';
-import { SYSTEM_MESSAGE, buildContextBlock, sonnetModel } from '../constants';
+import { sonnetModel } from '../constants';
+import { SYSTEM_MESSAGE, buildContextBlock } from '../../llm/promptBuilder';
 
 export const injectContext = async (state: AgentState) => {
   const documents = state.retrievedContext?.documents ?? [];
   const memories = state.retrievedContext?.memories ?? [];
 
+  console.log(`[injectContext] Documents: ${documents.length}, Memories: ${memories.length}`);
+
   const contextBlock = buildContextBlock(documents, memories);
+  console.log(
+    `[injectContext] Context block: ${contextBlock ? contextBlock.length + ' chars' : 'null'}`
+  );
 
   const userQuery = state.userQuery;
 
