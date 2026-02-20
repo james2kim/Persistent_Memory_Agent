@@ -147,7 +147,7 @@ export const retrievalGateAssessmentSchema = z.object({
   referencesUploadedContent: z
     .boolean()
     .describe('Does query reference documents, notes, papers, or study materials?'),
-  reasoning: z.string().min(10).max(300).describe('Brief explanation of the assessment'),
+  reasoning: z.string().min(10).max(500).describe('Brief explanation of the assessment'),
 });
 
 export const retrievalGateDecisionSchema = z.object({
@@ -156,7 +156,7 @@ export const retrievalGateDecisionSchema = z.object({
   needsClarification: z
     .boolean()
     .describe('Whether the query is too ambiguous and needs clarification'),
-  reasoning: z.string().max(300).describe('Brief explanation of the decision'),
+  reasoning: z.string().max(500).describe('Brief explanation of the decision'),
 });
 
 export const retrievedContextSchema = z.object({

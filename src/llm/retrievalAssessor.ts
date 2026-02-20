@@ -140,11 +140,11 @@ export const retrievalGatePolicy = (assessment: RetrievalGateAssessment): Retrie
   // Search documents if:
   // - Explicitly references uploaded content, OR
   // - Query is study_content type with non-low risk, OR
-  // - High risk personal query (facts like severance, contracts could be in docs)
+  // - Personal query with moderate/high risk (resumes, work history might be in docs)
   const shouldRetrieveDocuments =
     assessment.referencesUploadedContent ||
     (assessment.queryType === 'study_content' && assessment.riskWithoutRetrieval !== 'low') ||
-    (assessment.queryType === 'personal' && assessment.riskWithoutRetrieval === 'high');
+    (assessment.queryType === 'personal' && assessment.riskWithoutRetrieval !== 'low');
 
   return {
     shouldRetrieveDocuments,

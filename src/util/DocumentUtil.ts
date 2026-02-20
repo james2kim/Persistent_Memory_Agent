@@ -6,9 +6,8 @@ import type { DocumentStore } from '../stores/DocumentStore';
 const DEFAULT_BUDGET = {
   maxContextTokens: 2500,
   maxChunks: 8,
-  maxPerDoc: 2,
+  maxPerDoc: 4,
   maxChunkTokens: 700,
-  minConfidence: 0.6,
 };
 
 export type BudgetOptions = {
@@ -16,7 +15,6 @@ export type BudgetOptions = {
   maxChunks?: number;
   maxPerDoc?: number;
   maxChunkTokens?: number;
-  minConfidence?: number;
 };
 
 export const DocumentUtil = {
@@ -70,8 +68,8 @@ export const DocumentUtil = {
     text: string,
     opts?: { maxTokensPerChunk?: number; overlapTokens?: number }
   ): Promise<RawChunk[]> {
-    const maxTokens = opts?.maxTokensPerChunk ?? 500;
-    const overlapTokens = opts?.overlapTokens ?? 80;
+    const maxTokens = opts?.maxTokensPerChunk ?? 600;
+    const overlapTokens = opts?.overlapTokens ?? 200;
 
     const splitter = new RecursiveCharacterTextSplitter({
       chunkSize: maxTokens,
@@ -210,7 +208,6 @@ export const DocumentUtil = {
       user_id: input.user_id,
       topK,
     });
-    console.log(rawChunks);
 
     if (rawChunks.length === 0) {
       return [];
@@ -220,10 +217,6 @@ export const DocumentUtil = {
     type ChunkWithDistance = RetrievedChunk & { distance: number };
 
     // Confidence is computed by calculating which chunk has the smallest cosine distance from the embedded query
-    const distances = rawChunks.map((c) => c.distance);
-    const minD = Math.min(...distances);
-    const maxD = Math.max(...distances);
-    const range = Math.max(1e-9, maxD - minD);
 
     const extendedChunks: ChunkWithDistance[] = rawChunks.map((chunk) => ({
       id: chunk.id,
@@ -254,14 +247,14 @@ export const DocumentUtil = {
       created_at: chunk.created_at,
       embedding: chunk.embedding,
       distance: chunk.distance,
-      confidence: 1 - (chunk.distance - minD) / range,
+      // Absolute confidence: 1.0 at distance=0, 0.0 at distance=1
+      confidence: Math.max(0, 1 - chunk.distance),
     }));
 
-    const confidentDocumentChunks = documentChunks.filter(
-      (chunk) => chunk.confidence >= (budgetOptions?.minConfidence ?? 0.6)
-    );
+    // No confidence filter - let budget constraints handle limiting
+    // The confidence score is still useful for sorting in buildContextBlock
 
     // 5. Apply budget constraints
-    return this.applyBudget(confidentDocumentChunks, budgetOptions);
+    return this.applyBudget(documentChunks, budgetOptions);
   },
 };

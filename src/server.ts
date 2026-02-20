@@ -267,11 +267,16 @@ app.get('/api/session', async (req, res) => {
       .map((msg: unknown) => {
         const m = msg as Record<string, unknown>;
 
+        // Check if already a plain object with role
+        if (typeof m.role === 'string' && typeof m.content === 'string') {
+          return { role: m.role, content: m.content };
+        }
+
         // LangChain serialized format:
         // { id: ["langchain_core", "messages", "HumanMessage"], kwargs: { content: "..." } }
         const msgId = m.id as string[] | undefined;
         const kwargs = m.kwargs as Record<string, unknown> | undefined;
-        const msgType = msgId?.[2]?.toLowerCase() || '';
+        const msgType = Array.isArray(msgId) ? (msgId[2]?.toLowerCase() || '') : '';
 
         // Determine role
         let role = 'system';
