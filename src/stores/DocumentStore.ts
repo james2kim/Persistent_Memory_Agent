@@ -34,30 +34,54 @@ export class DocumentStore {
   }
 
   async listChunksBySimilarity(
-    input: { topK: number; queryEmbedding: number[]; user_id: string },
+    input: {
+      topK: number;
+      queryEmbedding: number[];
+      user_id: string;
+      filterYear?: number; // Optional temporal filter
+    },
     trx?: Knex.Transaction
   ) {
     const k = trx ?? this.knex;
     const vectorLiteral = EmbeddingUtil.toPgVectorLiteral(input.queryEmbedding);
 
-    const chunks = k('chunks')
+    let query = k('chunks')
+      .join('documents', 'chunks.document_id', 'documents.id')
       .select([
-        'id',
-        'document_id',
-        'chunk_index',
-        'content',
-        'token_count',
-        'metadata',
-        'embedding',
-        'created_at',
+        'chunks.id',
+        'chunks.document_id',
+        'chunks.chunk_index',
+        'chunks.content',
+        'chunks.token_count',
+        'chunks.metadata',
+        'chunks.embedding',
+        'chunks.created_at',
+        'chunks.start_year',
+        'chunks.end_year',
+        'documents.title as document_title',
+        'documents.source as document_source',
       ])
-      .select(k.raw('(embedding <=> ?::vector) AS distance', [vectorLiteral]))
-      .whereNotNull('embedding')
-      .andWhere('user_id', '=', input.user_id)
-      .orderByRaw('embedding <=> ?::vector', [vectorLiteral])
-      .limit(input.topK);
+      .select(k.raw('(chunks.embedding <=> ?::vector) AS distance', [vectorLiteral]))
+      .whereNotNull('chunks.embedding')
+      .andWhere('chunks.user_id', '=', input.user_id);
 
-    return await chunks;
+    // Apply temporal filter if year is specified
+    if (input.filterYear) {
+      const year = input.filterYear;
+      const currentYear = new Date().getFullYear();
+      query = query.andWhere(function () {
+        this.where('chunks.start_year', '<=', year).andWhere(function () {
+          // end_year IS NULL means "Present" (ongoing)
+          this.whereNull('chunks.end_year')
+            .andWhere('chunks.start_year', '<=', currentYear)
+            .orWhere('chunks.end_year', '>=', year);
+        });
+      });
+    }
+
+    query = query.orderByRaw('chunks.embedding <=> ?::vector', [vectorLiteral]).limit(input.topK);
+
+    return await query;
   }
 
   async upsertChunks(
@@ -70,6 +94,8 @@ export class DocumentStore {
         token_count: number;
         embedding: number[];
         metadata?: Record<string, unknown>;
+        start_year?: number | null;
+        end_year?: number | null;
       }>;
     },
     trx?: Knex.Transaction
@@ -84,6 +110,9 @@ export class DocumentStore {
       token_count: chunk.token_count,
       metadata: chunk.metadata ?? {},
       embedding: k.raw('?::vector', [EmbeddingUtil.toPgVectorLiteral(chunk.embedding)]),
+      start_year: chunk.start_year ?? null,
+      end_year: chunk.end_year ?? null,
+      search_vector: k.raw("to_tsvector('english', ?)", [chunk.content]),
       updated_at: k.fn.now(),
     }));
 
@@ -95,7 +124,138 @@ export class DocumentStore {
         token_count: k.raw('excluded.token_count'),
         metadata: k.raw('excluded.metadata'),
         embedding: k.raw('excluded.embedding'),
+        start_year: k.raw('excluded.start_year'),
+        end_year: k.raw('excluded.end_year'),
+        search_vector: k.raw('excluded.search_vector'),
         updated_at: k.fn.now(),
       });
+  }
+
+  /**
+   * Full-text keyword search using PostgreSQL tsvector.
+   */
+  async listChunksByKeyword(
+    input: {
+      query: string;
+      user_id: string;
+      topK: number;
+      filterYear?: number;
+    },
+    trx?: Knex.Transaction
+  ) {
+    const k = trx ?? this.knex;
+
+    // Convert query to tsquery (handles multiple words with OR)
+    // "context middle" -> "context | middle"
+    const tsQuery = input.query
+      .split(/\s+/)
+      .filter((w) => w.length > 2)
+      .join(' | ');
+
+    if (!tsQuery) return [];
+
+    let query = k('chunks')
+      .join('documents', 'chunks.document_id', 'documents.id')
+      .select([
+        'chunks.id',
+        'chunks.document_id',
+        'chunks.chunk_index',
+        'chunks.content',
+        'chunks.token_count',
+        'chunks.metadata',
+        'chunks.embedding',
+        'chunks.created_at',
+        'chunks.start_year',
+        'chunks.end_year',
+        'documents.title as document_title',
+        'documents.source as document_source',
+      ])
+      .select(k.raw("ts_rank(chunks.search_vector, to_tsquery('english', ?)) AS rank", [tsQuery]))
+      .whereRaw("chunks.search_vector @@ to_tsquery('english', ?)", [tsQuery])
+      .andWhere('chunks.user_id', '=', input.user_id);
+
+    // Apply temporal filter if year is specified
+    if (input.filterYear) {
+      const year = input.filterYear;
+      const currentYear = new Date().getFullYear();
+      query = query.andWhere(function () {
+        this.where('chunks.start_year', '<=', year).andWhere(function () {
+          this.whereNull('chunks.end_year')
+            .andWhere('chunks.start_year', '<=', currentYear)
+            .orWhere('chunks.end_year', '>=', year);
+        });
+      });
+    }
+
+    query = query.orderBy('rank', 'desc').limit(input.topK);
+
+    return await query;
+  }
+
+  /**
+   * Hybrid search: combines embedding similarity + keyword matching.
+   * Uses Reciprocal Rank Fusion (RRF) to merge results.
+   */
+  async hybridSearch(
+    input: {
+      query: string;
+      queryEmbedding: number[];
+      user_id: string;
+      topK: number;
+      filterYear?: number;
+    },
+    trx?: Knex.Transaction
+  ) {
+    // Run both searches in parallel
+    const [embeddingResults, keywordResults] = await Promise.all([
+      this.listChunksBySimilarity(
+        {
+          queryEmbedding: input.queryEmbedding,
+          user_id: input.user_id,
+          topK: input.topK * 2, // Fetch more for fusion
+          filterYear: input.filterYear,
+        },
+        trx
+      ),
+      this.listChunksByKeyword(
+        {
+          query: input.query,
+          user_id: input.user_id,
+          topK: input.topK * 2,
+          filterYear: input.filterYear,
+        },
+        trx
+      ),
+    ]);
+
+    // Reciprocal Rank Fusion (RRF)
+    // score = sum(1 / (k + rank)) where k=60 is standard
+    const k = 60;
+    const scores = new Map<string, { chunk: (typeof embeddingResults)[0]; score: number }>();
+
+    // Score embedding results
+    embeddingResults.forEach((chunk, rank) => {
+      const existing = scores.get(chunk.id) ?? { chunk, score: 0 };
+      existing.score += 1 / (k + rank + 1);
+      scores.set(chunk.id, existing);
+    });
+
+    // Score keyword results
+    keywordResults.forEach((chunk, rank) => {
+      const existing = scores.get(chunk.id) ?? { chunk, score: 0 };
+      existing.score += 1 / (k + rank + 1);
+      scores.set(chunk.id, existing);
+    });
+
+    // Sort by combined score and return top K
+    const sorted = Array.from(scores.values())
+      .sort((a, b) => b.score - a.score)
+      .slice(0, input.topK);
+
+    console.log(
+      `[hybrid] Embedding: ${embeddingResults.length}, Keyword: ${keywordResults.length}, Fused: ${sorted.length}`
+    );
+
+    return sorted.map((s) => s.chunk);
   }
 }

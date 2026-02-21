@@ -22,8 +22,12 @@ export const retrievalGate = async (state: AgentState) => {
     `[retrievalGate] Decision: docs=${decision.shouldRetrieveDocuments}, mems=${decision.shouldRetrieveMemories}, clarify=${decision.needsClarification}`
   );
 
+  // Clear context if skipping retrieval (prevents stale context from previous queries)
+  const skipRetrieval = !decision.shouldRetrieveDocuments && !decision.shouldRetrieveMemories;
+
   return {
     gateDecision: decision,
     queryEmbedding: queryEmbedding ?? undefined,
+    ...(skipRetrieval && { retrievedContext: { documents: [], memories: [] } }),
   };
 };

@@ -2,7 +2,11 @@ import { createClient, RedisClientType } from 'redis';
 import type { SessionState } from '../schemas/types';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
+import { MemoryStore } from './MemoryStore';
+import { defaultEmbedding } from '../services/EmbeddingService';
 dotenv.config({ path: '.env.local' });
+
+const STALE_HOURS = 12;
 
 /**
  * RedisSessionStore - Manages session IDs and provides a read view for the UI.
@@ -128,6 +132,30 @@ export class RedisSessionStoreClass {
       const exists = await this.client.exists(this.key(activeSessionId));
       if (exists) {
         const { state } = await this.getSession(activeSessionId, userId);
+
+        // Check if session is stale - persist summary to long-term memory
+        const isStale =
+          Date.now() - new Date(state.updatedAt).getTime() > STALE_HOURS * 60 * 60 * 1000;
+
+        if (isStale && state.summary) {
+          console.log(`[session] Stale session detected, persisting summary to long-term memory`);
+          try {
+            const embedding = await defaultEmbedding.embedText(state.summary, 'document');
+            await MemoryStore.addMemory(
+              {
+                type: 'summary',
+                content: state.summary,
+                confidence: 0.8,
+                user_id: userId,
+              },
+              embedding
+            );
+            console.log(`[session] Stored session summary as memory`);
+          } catch (err) {
+            console.error('[session] Failed to persist session summary:', err);
+          }
+        }
+
         return { sessionId: activeSessionId, state };
       }
     }

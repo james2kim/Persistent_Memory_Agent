@@ -1,6 +1,7 @@
 import { RecursiveCharacterTextSplitter } from '@langchain/textsplitters';
 import type { RawChunk, RetrievedChunk, DocumentChunk } from '../schemas/types';
 import type { DocumentStore } from '../stores/DocumentStore';
+import { extractQueryYear } from './TemporalUtil';
 
 // Budget constraints for document retrieval
 const DEFAULT_BUDGET = {
@@ -186,7 +187,7 @@ export const DocumentUtil = {
    * Retrieve relevant chunks from the document store.
    *
    * Pipeline:
-   * 1. Fetch topK similar chunks from DocumentStore
+   * 1. Hybrid search (embedding similarity + keyword matching + temporal filter)
    * 2. Filter by relevance rules
    * 3. Remove near-duplicate chunks
    * 4. Apply budget constraints
@@ -197,30 +198,43 @@ export const DocumentUtil = {
       queryEmbedding: number[];
       user_id: string;
       topK?: number;
+      userQuery: string;
     },
     budgetOptions?: BudgetOptions
   ): Promise<DocumentChunk[]> {
     const topK = input.topK ?? 20;
 
-    // 1. Fetch topK similar chunks
-    const rawChunks = await store.listChunksBySimilarity({
+    // Extract year from query for temporal filtering
+    const filterYear = extractQueryYear(input.userQuery);
+    if (filterYear) {
+      console.log(`[pipeline] Temporal filter: year=${filterYear}`);
+    }
+
+    // 1. Hybrid search: embedding similarity + keyword matching
+    const rawChunks = await store.hybridSearch({
+      query: input.userQuery,
       queryEmbedding: input.queryEmbedding,
       user_id: input.user_id,
       topK,
+      filterYear: filterYear ?? undefined,
     });
 
     if (rawChunks.length === 0) {
       return [];
     }
 
-    // Extended type to carry distance through pipeline
-    type ChunkWithDistance = RetrievedChunk & { distance: number };
-
-    // Confidence is computed by calculating which chunk has the smallest cosine distance from the embedded query
+    // Extended type to carry distance and document info through pipeline
+    type ChunkWithDistance = RetrievedChunk & {
+      distance: number;
+      document_title?: string;
+      document_source?: string;
+    };
 
     const extendedChunks: ChunkWithDistance[] = rawChunks.map((chunk) => ({
       id: chunk.id,
       document_id: chunk.document_id,
+      document_title: chunk.document_title,
+      document_source: chunk.document_source,
       chunk_index: chunk.chunk_index,
       content: chunk.content,
       token_count: chunk.token_count,
@@ -230,16 +244,27 @@ export const DocumentUtil = {
       distance: chunk.distance,
     }));
 
+    // Debug: check if Axiom chunk is in raw results
+    const hasAxiomRaw = extendedChunks.some((c) => c.content.includes('Axiom'));
+    console.log(`[pipeline] Raw chunks: ${extendedChunks.length}, has Axiom: ${hasAxiomRaw}`);
+
     // 2. Filter by relevance rules
     const relevant = extendedChunks.filter((chunk) => this.passRelevanceRules(chunk));
+    const hasAxiomRelevant = relevant.some((c) => c.content.includes('Axiom'));
+    console.log(
+      `[pipeline] After relevance filter: ${relevant.length}, has Axiom: ${hasAxiomRelevant}`
+    );
 
     // 3. Remove near-duplicates (cast to RetrievedChunk for the function, then back)
     const deduped = this.removeDuplicateChunks(relevant) as ChunkWithDistance[];
-
+    const hasAxiomDeduped = deduped.some((c) => c.content.includes('Axiom'));
+    console.log(`[pipeline] After dedup: ${deduped.length}, has Axiom: ${hasAxiomDeduped}`);
     // 4. Convert to DocumentChunk format for budget application
     const documentChunks: DocumentChunk[] = deduped.map((chunk) => ({
       id: chunk.id,
       document_id: chunk.document_id,
+      document_title: chunk.document_title,
+      document_source: chunk.document_source,
       chunk_index: chunk.chunk_index,
       content: chunk.content,
       token_count: chunk.token_count,
@@ -251,10 +276,7 @@ export const DocumentUtil = {
       confidence: Math.max(0, 1 - chunk.distance),
     }));
 
-    // No confidence filter - let budget constraints handle limiting
-    // The confidence score is still useful for sorting in buildContextBlock
-
-    // 5. Apply budget constraints
+    // 6. Apply budget constraints (keeps first N = most relevant)
     return this.applyBudget(documentChunks, budgetOptions);
   },
 };

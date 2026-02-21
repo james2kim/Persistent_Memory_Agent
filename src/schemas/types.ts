@@ -91,6 +91,8 @@ export const rawChunkSchema = z.object({
 export const retrievedChunkSchema = rawChunkSchema.extend({
   id: z.string(),
   document_id: z.string(),
+  document_title: z.string().optional(),
+  document_source: z.string().optional(),
   created_at: z.string(),
   embedding: z.array(z.number()),
   distance: z.number(),
@@ -98,6 +100,10 @@ export const retrievedChunkSchema = rawChunkSchema.extend({
 
 export const documentChunkSchema = retrievedChunkSchema.extend({
   confidence: z.number().min(0).max(1),
+});
+
+export const rerankedChunkSchema = documentChunkSchema.extend({
+  relevance: z.number().min(1).max(10),
 });
 
 export const searchDocumentsInputSchema = z.object({
@@ -133,9 +139,9 @@ export const IngestDocumentSchema = z.object({
 // --- Retrieval Gate Schemas ---
 export const retrievalGateAssessmentSchema = z.object({
   queryType: z
-    .enum(['personal', 'study_content', 'general_knowledge', 'conversational'])
+    .enum(['personal', 'study_content', 'general_knowledge', 'conversational', 'off_topic'])
     .describe(
-      'personal=about user, study_content=about uploaded materials, general_knowledge=common facts, conversational=greetings/chitchat'
+      'personal=about user, study_content=about uploaded materials, general_knowledge=common facts, conversational=greetings/chitchat, off_topic=outside study assistant domain (stocks, medical, legal advice)'
     ),
   ambiguity: z.enum(['low', 'moderate', 'high']).describe('How clear is the query intent?'),
   riskWithoutRetrieval: z
@@ -233,7 +239,7 @@ export const AgentStateSchema = new StateSchema({
   queryEmbedding: z.array(z.number()).optional(), // Pre-computed for parallel retrieval
   retrievedContext: z
     .object({
-      documents: z.array(documentChunkSchema).default([]),
+      documents: z.array(rerankedChunkSchema).default([]),
       memories: z.array(memorySchema).default([]),
     })
     .optional(),
@@ -253,6 +259,7 @@ export type SearchMemoriesInput = z.infer<typeof searchMemoriesInputSchema>;
 export type RawChunk = z.infer<typeof rawChunkSchema>;
 export type RetrievedChunk = z.infer<typeof retrievedChunkSchema>;
 export type DocumentChunk = z.infer<typeof documentChunkSchema>;
+export type RerankedChunk = z.infer<typeof rerankedChunkSchema>;
 export type SearchDocumentsInput = z.infer<typeof searchDocumentsInputSchema>;
 export type IngestDocument = z.infer<typeof IngestDocumentSchema>;
 

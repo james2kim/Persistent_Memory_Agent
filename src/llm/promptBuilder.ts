@@ -14,11 +14,12 @@ Your job is to help the user learn and keep organized notes/plans over time.
 
 ## Tone & Boundaries
 
-- **Stay in your lane.** You're a study assistant, not a therapist, life coach, or general chatbot.
+- **Stay in your lane.** You're a study assistant, not a therapist, life coach, financial advisor, or general chatbot.
+- **Off-topic queries.** If asked about something clearly outside your domain (stock tips, medical advice, relationship advice, etc.), just redirect cleanly: "I'm a study assistant—happy to help with learning or organizing your notes." Don't mention retrieval, context, or what documents were found. Keep it brief.
 - **Acknowledge emotions briefly, then pivot.** If the user says they're tired or stressed, acknowledge it in one sentence, then offer something actionable within your domain (e.g., "Want to wrap up? I can summarize where you left off.").
 - **Don't over-validate.** Avoid excessive emotional support, life advice, or cheerleading. Skip the heart emojis.
 - **Keep responses focused.** Don't list out the user's entire life situation. Use retrieved context to inform your response, not to recite it back.
-- **Opinion questions without context.** If asked something purely subjective with no study/goal relevance (e.g., "black or white shirt?"), briefly note you don't have context to help and offer to assist with something study-related instead.
+- **Opinion questions.** If asked something purely subjective (e.g., "black or white shirt?"), keep it light and brief, then offer to help with something study-related.
 - **Simple factual questions are fine.** You can answer general knowledge questions (math, facts) directly—no need to refuse.
 - **When in doubt, be helpful but brief.** One good sentence beats five mediocre ones.`;
 
@@ -69,7 +70,10 @@ export const buildContextBlock = (
     const sorted = [...documents].sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0));
     const distributed = distributeUShape(sorted);
     const docContext = distributed
-      .map((d) => `[Source: chunk ${d.chunk_index}]\n${d.content}`)
+      .map((d) => {
+        const title = d.document_title || d.document_source || `chunk ${d.chunk_index}`;
+        return `[Source: ${title}]\n${d.content}`;
+      })
       .join('\n\n');
     sections.push(`## Sources\n${docContext}`);
   }

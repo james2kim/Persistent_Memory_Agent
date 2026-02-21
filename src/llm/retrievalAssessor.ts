@@ -17,6 +17,7 @@ const SYSTEM_MESSAGE = `You are a query assessor for a study assistant. Analyze 
 - **study_content**: About uploaded documents, notes, papers, educational material
 - **general_knowledge**: Common facts the assistant already knows
 - **conversational**: Greetings, small talk, meta-questions
+- **off_topic**: Outside study assistant domain (stock tips, medical advice, legal advice, relationship advice)
 
 ### ambiguity (low | moderate | high)
 - **low**: Clear, specific intent (e.g., "What is my main goal?")
@@ -63,7 +64,12 @@ Query: "Based on my study plan, what should I focus on for mitochondria?"
 Query: "What is the capital of France?"
 → queryType: general_knowledge, ambiguity: low, riskWithoutRetrieval: low
 → referencesPersonalContext: false, referencesUploadedContent: false
-→ reasoning: "General fact, no retrieval needed"`;
+→ reasoning: "General fact, no retrieval needed"
+
+Query: "What stocks should I buy?"
+→ queryType: off_topic, ambiguity: low, riskWithoutRetrieval: low
+→ referencesPersonalContext: false, referencesUploadedContent: false
+→ reasoning: "Financial advice is outside study assistant domain"`;
 
 const modelWithAssessmentSchema = haikuModel.withStructuredOutput(retrievalGateAssessmentSchema);
 
@@ -80,76 +86,41 @@ export const retrievalGateAssessor = async (query: string): Promise<RetrievalGat
 
 /**
  * Deterministic policy that takes assessment and decides what to retrieve.
- * Adjust these rules to tune retrieval behavior.
+ *
+ * Philosophy: Retrieve by default. The cost of missing relevant context is
+ * higher than the cost of searching unnecessarily. Only skip for pure
+ * conversational queries (greetings, small talk).
  */
 export const retrievalGatePolicy = (assessment: RetrievalGateAssessment): RetrievalGateDecision => {
-  // 0) Conversational queries: no retrieval
-  if (assessment.queryType === 'conversational') {
+  // Skip retrieval for conversational and off-topic queries
+  if (assessment.queryType === 'conversational' || assessment.queryType === 'off_topic') {
     return {
       shouldRetrieveDocuments: false,
       shouldRetrieveMemories: false,
       needsClarification: false,
-      reasoning: 'Conversational query, no retrieval needed',
+      reasoning: `${assessment.queryType} query, no retrieval needed`,
     };
   }
 
-  // 1) High ambiguity: clarifying question needed.
-  // Allow retrieval as hints when the query clearly points at memories/docs.
-  if (assessment.ambiguity === 'high') {
-    const memHint = assessment.referencesPersonalContext || assessment.queryType === 'personal';
-    const docHint =
-      assessment.referencesUploadedContent || assessment.queryType === 'study_content';
+  // For everything else: search documents by default
+  // User may have uploaded docs on any topic (React, ReAct, etc.)
+  const shouldRetrieveDocuments = true;
 
-    // Only need clarification if we have no retrieval hints
-    const hasHints = memHint || docHint;
-
-    return {
-      shouldRetrieveDocuments: docHint,
-      shouldRetrieveMemories: memHint,
-      needsClarification: !hasHints,
-      reasoning: hasHints
-        ? 'High ambiguity but have context hints; retrieve then clarify if needed'
-        : 'High ambiguity with no context hints; clarification needed',
-    };
-  }
-
-  // 2) General knowledge: if low risk, answer directly; if not low risk, clarify constraints.
-  if (assessment.queryType === 'general_knowledge') {
-    if (assessment.riskWithoutRetrieval === 'low') {
-      return {
-        shouldRetrieveDocuments: false,
-        shouldRetrieveMemories: false,
-        needsClarification: false,
-        reasoning: 'General knowledge, assistant can answer directly',
-      };
-    }
-
-    return {
-      shouldRetrieveDocuments: false,
-      shouldRetrieveMemories: false,
-      needsClarification: true,
-      reasoning: 'High-stakes general query: clarify constraints before answering',
-    };
-  }
-
-  // 3) Determine retrieval based on strong signals (references flags) + risk as a booster
+  // Search memories if personal context is involved
   const shouldRetrieveMemories =
     assessment.referencesPersonalContext ||
-    (assessment.queryType === 'personal' && assessment.riskWithoutRetrieval !== 'low');
+    assessment.queryType === 'personal';
 
-  // Search documents if:
-  // - Explicitly references uploaded content, OR
-  // - Query is study_content type with non-low risk, OR
-  // - Personal query with moderate/high risk (resumes, work history might be in docs)
-  const shouldRetrieveDocuments =
-    assessment.referencesUploadedContent ||
-    (assessment.queryType === 'study_content' && assessment.riskWithoutRetrieval !== 'low') ||
-    (assessment.queryType === 'personal' && assessment.riskWithoutRetrieval !== 'low');
+  // Only clarify if highly ambiguous AND no clear direction
+  const needsClarification =
+    assessment.ambiguity === 'high' &&
+    !assessment.referencesPersonalContext &&
+    !assessment.referencesUploadedContent;
 
   return {
     shouldRetrieveDocuments,
     shouldRetrieveMemories,
-    needsClarification: false,
-    reasoning: `Policy: docs=${shouldRetrieveDocuments}, mems=${shouldRetrieveMemories}`,
+    needsClarification,
+    reasoning: `Retrieve by default: docs=${shouldRetrieveDocuments}, mems=${shouldRetrieveMemories}`,
   };
 };

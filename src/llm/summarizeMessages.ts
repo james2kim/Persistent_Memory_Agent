@@ -1,6 +1,7 @@
 import dotenv from 'dotenv';
 dotenv.config({ path: '.env.local' });
 import type { BaseMessage } from '@langchain/core/messages';
+import type { Message } from '../schemas/types';
 import { z } from 'zod/v4';
 import { sonnetModel } from '../agent/constants';
 
@@ -123,6 +124,41 @@ export const summarize = async (existingSummary: string, messages: BaseMessage[]
     );
     finalContent = await compressSummary(finalContent);
     console.log(`[summarize] Compressed to ${finalContent.length} chars`);
+  }
+
+  return {
+    confidence: response.confidence,
+    content: finalContent,
+  };
+};
+
+/**
+ * Summarize plain session messages (for stale session archival).
+ */
+export const summarizeSessionMessages = async (
+  existingSummary: string,
+  messages: Message[]
+): Promise<{ confidence: number; content: string }> => {
+  const formattedMessages = messages
+    .map((m) => `[${m.role}]: ${m.content}`)
+    .join('\n');
+
+  const existingSummarySection = existingSummary
+    ? `\n\nEXISTING SUMMARY TO MERGE:\n${existingSummary}`
+    : '';
+
+  const response = await modelWithRelaxedSchema.invoke([
+    { role: 'system', content: SUMMARIZE_MESSAGES_SYSTEM_PROMPT },
+    {
+      role: 'user',
+      content: `Summarize this conversation and merge with any existing summary:${existingSummarySection}\n\nNEW CONVERSATION:\n${formattedMessages}`,
+    },
+  ]);
+
+  let finalContent = response.content;
+  if (finalContent.length > COMPRESSION_THRESHOLD) {
+    console.log(`[summarizeSession] Compressing summary (${finalContent.length} chars)...`);
+    finalContent = await compressSummary(finalContent);
   }
 
   return {

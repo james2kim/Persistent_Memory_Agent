@@ -1,153 +1,281 @@
 # Persistent Memory Study Agent
 
-A conversational AI agent with persistent memory across sessions. Built with LangGraph, Redis, and SQLite.
+A conversational AI study assistant with persistent memory, document RAG, and intelligent retrieval. Built with LangGraph, PostgreSQL (pgvector), and Redis.
+
+## Features
+
+- **Persistent Memory** - Extracts and stores facts, goals, preferences, and decisions from conversations
+- **Document RAG** - Upload and query documents with hybrid search (semantic + keyword + temporal)
+- **Session Continuity** - Redis-backed sessions with automatic summary archival to long-term memory
+- **Smart Retrieval** - LLM-powered retrieval gate decides when to search documents vs. memories vs. neither
 
 ## Architecture Overview
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        User Input                           │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    LangGraph Workflow                       │
-│  ┌──────────────────┐      ┌─────────────────────────────┐  │
-│  │  classifyIntent  │─────▶│  executeTools (if needed)   │  │
-│  │  (Node 1)        │◀─────│  (Node 2)                   │  │
-│  └────────┬─────────┘      └─────────────────────────────┘  │
-│           │                                                  │
-│           ▼                                                  │
-│  ┌──────────────────┐      ┌─────────────────────────────┐  │
-│  │  extractMemory   │─────▶│  summarizeMessages          │  │
-│  │  (Node 3)        │      │  (Node 4, if needed)        │  │
-│  └──────────────────┘      └─────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────┘
-         │                              │
-         ▼                              ▼
-┌─────────────────┐          ┌─────────────────────┐
-│     SQLite      │          │       Redis         │
-│  (Long-term)    │          │   (Short-term)      │
-│                 │          │                     │
-│  • Facts        │          │  • Messages         │
-│  • Preferences  │          │  • Session state    │
-│  • Goals        │          │  • Summary          │
-│  • Decisions    │          │  • Checkpoints      │
-└─────────────────┘          └─────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│                         User Query                                   │
+└─────────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                      LangGraph Workflow                              │
+│  ┌──────────────────────────────────────────────────────────────┐   │
+│  │                     retrievalGate                             │   │
+│  │  • LLM assesses query type (personal/study/general/off-topic) │   │
+│  │  • Generates query embedding in parallel                      │   │
+│  │  • Policy decides: retrieve docs? memories? clarify?          │   │
+│  └──────────────────────────┬───────────────────────────────────┘   │
+│              ┌──────────────┴──────────────┐                        │
+│              ▼                             ▼                        │
+│  ┌──────────────────────┐    ┌─────────────────────────────────┐   │
+│  │ clarificationResponse│    │  retrieveMemoriesAndChunks      │   │
+│  │  (if ambiguous)      │    │  • Hybrid search (embedding+BM25)│   │
+│  └──────────────────────┘    │  • Temporal filtering            │   │
+│                              │  • RRF fusion                    │   │
+│                              └─────────────┬───────────────────┘   │
+│                                            ▼                        │
+│                              ┌─────────────────────────────────┐   │
+│                              │        injectContext             │   │
+│                              │  • U-shape distribution          │   │
+│                              │  • Build context + generate reply│   │
+│                              └─────────────┬───────────────────┘   │
+│                                            ▼                        │
+│                              ┌─────────────────────────────────┐   │
+│                              │   extractAndStoreKnowledge       │   │
+│                              │  • Extract facts/goals/prefs     │   │
+│                              │  • Dedupe via cosine similarity  │   │
+│                              │  • Summarize messages (background)│   │
+│                              └─────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────┘
+         │                                        │
+         ▼                                        ▼
+┌─────────────────────┐              ┌─────────────────────────┐
+│    PostgreSQL       │              │         Redis           │
+│   (Long-term)       │              │      (Short-term)       │
+│                     │              │                         │
+│  • memories (pgvector)             │  • Session state        │
+│  • documents         │              │  • Messages + summary   │
+│  • chunks (hybrid idx)│             │  • LangGraph checkpoints│
+└─────────────────────┘              └─────────────────────────┘
 ```
 
 ## Memory Architecture
 
 ### Short-Term Memory (Redis)
 
-Session-scoped memory that persists across application restarts:
+Session-scoped memory with 24-hour TTL:
 
-| Key | Purpose |
-|-----|---------|
-| `session:<id>` | Current session state (messages, summary, metadata) |
-| `checkpoint:<id>:latest` | LangGraph checkpoint for workflow resumption |
+| Key Pattern | Purpose |
+|-------------|---------|
+| `session:<id>` | Session state (messages, summary, taskState) |
+| `checkpoint:<thread_id>:latest` | LangGraph checkpoint for workflow resumption |
 | `user:<id>:active_session` | Maps user to their active session |
 
-**Why Redis?**
-- Fast read/write for frequent message updates
-- TTL support for session expiration
-- Survives application crashes
+**Stale Session Archival**: When a session is inactive for 12+ hours but accessed again, the session summary is persisted to long-term memory before continuing. This ensures important context survives session expiration.
 
-### Long-Term Memory (SQLite)
+### Long-Term Memory (PostgreSQL + pgvector)
 
-Permanent storage for extracted knowledge:
+Permanent storage for extracted knowledge and documents:
 
+**memories table:**
 | Field | Description |
 |-------|-------------|
 | `type` | fact, preference, goal, decision, summary |
 | `content` | The extracted memory content |
 | `confidence` | 0.0-1.0 extraction confidence |
-| `embedding` | VoyageAI embedding for semantic search |
+| `embedding` | VoyageAI embedding (vector) for semantic search |
+| `user_id` | Owner of the memory |
 
-**Why SQLite?**
-- Simple, file-based, no server needed
-- Good enough for single-user scenarios
-- Easy to inspect and debug
+**documents table:**
+| Field | Description |
+|-------|-------------|
+| `source` | File path or URL |
+| `title` | Document title |
+| `metadata` | JSON metadata |
+| `user_id` | Owner |
+
+**chunks table:**
+| Field | Description |
+|-------|-------------|
+| `content` | Chunk text |
+| `embedding` | vector for cosine similarity |
+| `search_vector` | tsvector for BM25 keyword search |
+| `start_year` | Temporal range start (extracted) |
+| `end_year` | Temporal range end (null = "Present") |
+| `document_id` | Parent document |
 
 ## Workflow Nodes
 
-### Node 1: classifyIntent
-Routes between tool calls and direct responses. Binds available tools to the LLM and invokes with conversation history.
+### 1. retrievalGate
+Routes queries based on LLM assessment + deterministic policy.
 
-### Node 2: executeTools
-Validates tool arguments against Zod schemas, executes tools, and returns results as ToolMessages.
+**Assessment** (Haiku - fast, cheap):
+- `queryType`: personal | study_content | general_knowledge | conversational | off_topic
+- `ambiguity`: low | moderate | high
+- `riskWithoutRetrieval`: low | moderate | high
+- `referencesPersonalContext`: boolean
+- `referencesUploadedContent`: boolean
 
-### Node 3: extractMemory
-Extracts facts, preferences, goals, and decisions from user messages. Uses semantic deduplication (cosine similarity ≥ 0.9) to avoid storing duplicates.
+**Policy** (deterministic):
+- `conversational` or `off_topic` → skip all retrieval
+- Everything else → search documents by default
+- `personal` queries also search memories
+- High ambiguity + no clear references → request clarification
 
-### Node 4: summarizeMessages
-Triggers when messages exceed `MAX_MESSAGES`. Summarizes oldest messages, merges with existing summary, and prunes using `RemoveMessage`.
+### 2. retrieveMemoriesAndChunks
+Executes hybrid search based on gate decision.
 
-## Key Design Decisions
+**Hybrid Search Pipeline:**
+1. Extract temporal year from query (e.g., "what did I do in 2023" → 2023)
+2. Run in parallel:
+   - **Embedding search**: pgvector cosine similarity with optional temporal filter
+   - **Keyword search**: PostgreSQL tsvector/BM25 with same temporal filter
+3. **RRF Fusion**: Combine results using Reciprocal Rank Fusion
+   - `score = Σ(1 / (k + rank))` where k=60
+4. Deduplicate and return top K chunks
 
-### 1. Dual Memory System
-- **Short-term (Redis)**: Full conversation history for context
-- **Long-term (SQLite)**: Extracted facts that persist forever
+### 3. injectContext
+Builds the context block and generates the response.
 
-This separation allows the agent to "remember" important information even after conversation history is summarized/pruned.
+**U-Shape Distribution** (based on "Lost in the Middle" research):
+- LLMs attend most to beginning and end of context
+- Most relevant items placed at front and back
+- Least relevant items buried in the middle
 
-### 2. Custom Checkpointer
-LangGraph's checkpointer is extended to sync state to our Redis session store. This provides:
-- Workflow resumption after crashes
-- Session state accessible outside the graph
+```
+Input (by relevance):  [1, 2, 3, 4, 5, 6]
+Output (U-shape):      [1, 3, 5, 6, 4, 2]
+```
 
-### 3. MessagesValue Reducer
-Using LangGraph's `MessagesValue` for automatic message appending instead of manual array spreading. Supports `RemoveMessage` for safe pruning.
+**Context Format:**
+```
+## User Context
+- [goal] Complete the study plan by Friday
+- [preference] Prefers concise explanations
 
-### 4. Safe Message Pruning
-The `findSafeCutIndex` function ensures we never split tool_use/tool_result pairs when summarizing, which would cause API errors.
+## Sources
+[Source: Resume.pdf]
+Software Engineer at Axiom, June 2022 – Present...
 
-### 5. Semantic Deduplication
-Before adding a memory, we check for existing memories with cosine similarity ≥ 0.9. This prevents storing "User likes TypeScript" multiple times.
+[Source: Biology Notes.md]
+Cellular respiration is the process...
+```
 
-### 6. User ID from Config
-User ID is stored in `~/.memory-agent.json` and persists across sessions. This allows the agent to maintain separate memory stores per user.
+### 4. extractAndStoreKnowledge
+Background extraction of knowledge from the conversation.
+
+- Extracts facts, goals, preferences, decisions
+- Deduplicates against existing memories (cosine similarity ≥ 0.9)
+- Triggers message summarization when conversation gets long
+
+### 5. clarificationResponse
+Handles ambiguous queries by asking for clarification.
+
+## Key Architecture Decisions
+
+### 1. Hybrid Search with Temporal Filtering
+
+Pure semantic search misses queries like "what did I do in 2023" because embeddings don't capture temporal specificity well. The hybrid approach:
+
+- **Embedding search**: Catches semantic meaning ("work experience" ≈ "job")
+- **Keyword search**: Catches exact terms ("2023", "Axiom")
+- **Temporal filter**: `start_year <= queryYear AND (end_year IS NULL OR end_year >= queryYear)`
+- **RRF fusion**: Combines both rankings fairly
+
+### 2. Retrieval Gate (LLM Assessment + Deterministic Policy)
+
+Separates "understanding" from "deciding":
+- **LLM assessment**: Haiku classifies query characteristics (fast, cheap)
+- **Deterministic policy**: Code decides retrieval strategy (predictable, testable)
+
+This avoids unpredictable LLM behavior in routing decisions while still leveraging LLM understanding.
+
+### 3. Off-Topic Handling
+
+Off-topic queries (stock tips, medical advice) skip retrieval entirely and get a clean redirect: "I'm a study assistant—happy to help with learning or organizing your notes."
+
+No mention of "I didn't find relevant documents" because that's confusing for genuinely off-topic questions.
+
+### 4. Session Summary Persistence
+
+When a session goes stale (12+ hours inactive), the accumulated session summary is stored as a long-term memory. This captures:
+- Decisions made during the session
+- Goals established
+- Important context
+
+Even after the Redis session expires, this knowledge persists.
+
+### 5. U-Shape Context Distribution
+
+Based on "Lost in the Middle" research showing LLMs attend poorly to middle content:
+- Most relevant → front (high attention)
+- Second most relevant → back (high attention)
+- Least relevant → middle (low attention)
+
+### 6. Document Title Citations
+
+Sources cite document titles (e.g., `[Source: Resume.pdf]`) instead of opaque chunk indices, making responses more useful.
 
 ## Project Structure
 
 ```
 src/
-├── main.ts                 # CLI entry point
-├── config.ts               # User ID management
+├── main.ts                    # CLI entry point
+├── server.ts                  # Express API server
+├── config.ts                  # User ID management
 │
 ├── agent/
-│   ├── constants.ts        # Model, system prompt, limits
-│   ├── graph.ts            # Workflow definition
-│   ├── routers.ts          # Conditional routing logic
+│   ├── graph.ts               # LangGraph workflow definition
+│   ├── routers.ts             # Conditional routing logic
+│   ├── constants.ts           # Models, limits, system prompt
 │   └── nodes/
-│       ├── classifyIntent.ts
-│       ├── executeTools.ts
-│       ├── extractMemory.ts
+│       ├── retrievalGate.ts
+│       ├── retrieveMemoriesAndChunks.ts
+│       ├── injectContext.ts
+│       ├── extractKnowledge.ts
+│       ├── clarificationResponse.ts
 │       └── summarize.ts
 │
+├── stores/
+│   ├── DocumentStore.ts       # Hybrid search, chunk management
+│   ├── MemoryStore.ts         # Long-term memory operations
+│   └── RedisSessionStore.ts   # Session state management
+│
 ├── memory/
-│   ├── extractMemories.ts  # LLM-based memory extraction
-│   ├── summarizeMessages.ts
-│   ├── MemoryUtil.ts       # Search, similarity, relevance
-│   ├── EmbeddingService.ts # VoyageAI embeddings
-│   ├── redis/
-│   │   ├── RedisSessionStore.ts
-│   │   └── RedisCheckpointer.ts
-│   └── sql/
-│       └── SqlMemoryStore.ts
+│   └── RedisCheckpointer.ts   # LangGraph checkpoint persistence
+│
+├── llm/
+│   ├── retrievalAssessor.ts   # Query classification
+│   ├── promptBuilder.ts       # Context block + system prompt
+│   ├── summarizeMessages.ts   # Conversation summarization
+│   └── extractMemories.ts     # Knowledge extraction
+│
+├── ingest/
+│   └── ingestDocument.ts      # Document chunking + embedding
+│
+├── services/
+│   └── EmbeddingService.ts    # VoyageAI embeddings
+│
+├── util/
+│   ├── DocumentUtil.ts        # Text chunking
+│   ├── TemporalUtil.ts        # Date range extraction
+│   └── EmbeddingUtil.ts       # Vector formatting
 │
 ├── schemas/
-│   └── types.ts            # Zod schemas and types
+│   └── types.ts               # Zod schemas and TypeScript types
 │
-└── tools/
-    └── tools.ts            # searchMemories tool
+└── db/
+    ├── knex.ts                # Database connection
+    └── migrations/            # PostgreSQL migrations
 ```
 
 ## Setup
 
 ### Prerequisites
+
 - Node.js 18+
-- Redis server running locally
+- PostgreSQL 15+ with pgvector extension
+- Redis server
 
 ### Installation
 
@@ -158,18 +286,71 @@ npm install
 # Start Redis (macOS)
 brew services start redis
 
+# Start PostgreSQL (macOS)
+brew services start postgresql
+
+# Create database with pgvector
+psql -c "CREATE DATABASE study_agent;"
+psql -d study_agent -c "CREATE EXTENSION IF NOT EXISTS vector;"
+
 # Create .env.local
 cp .env.example .env.local
-# Add your API keys:
-# ANTHROPIC_API_KEY=...
-# VOYAGE_API_KEY=...
-# REDIS_URL=redis://localhost:6379
+```
+
+**Required environment variables:**
+```
+ANTHROPIC_API_KEY=sk-ant-...
+VOYAGE_API_KEY=pa-...
+REDIS_URL=redis://localhost:6379
+DATABASE_URL=postgresql://localhost:5432/study_agent
+```
+
+### Database Migrations
+
+```bash
+# Run all migrations
+npm run migrate
+
+# Rollback if needed
+npm run migrate:rollback
 ```
 
 ### Running
 
 ```bash
-npx tsx src/main.ts
+# CLI mode
+npm start
+
+# Web server (API + UI)
+npm run server
+
+# Development with hot reload
+npm run server:dev
+```
+
+## API Endpoints
+
+### POST /api/chat
+Send a message and get a response.
+
+```json
+Request:  { "message": "What's in my biology notes?" }
+Response: { "response": "Based on your notes...", "sessionId": "..." }
+```
+
+### POST /api/upload
+Upload a document for ingestion.
+
+```
+Request:  FormData with file
+Response: { "documentId": "...", "chunkCount": 15 }
+```
+
+### GET /api/session
+Get current session state.
+
+```json
+Response: { "sessionId": "...", "messages": [...], "summary": "..." }
 ```
 
 ## Inspecting State
@@ -186,31 +367,44 @@ redis-cli GET "session:<id>" | python3 -m json.tool
 redis-cli MONITOR
 ```
 
-### SQLite
+### PostgreSQL
 ```bash
 # View memories
-sqlite3 -header -box memory.sqlite "SELECT id, type, confidence, content FROM memories;"
+psql -d study_agent -c "SELECT id, type, confidence, substring(content, 1, 50) FROM memories;"
+
+# View documents
+psql -d study_agent -c "SELECT id, title, source FROM documents;"
+
+# View chunks with temporal data
+psql -d study_agent -c "SELECT chunk_index, start_year, end_year, substring(content, 1, 40) FROM chunks;"
 ```
 
 ## Configuration
 
 | Constant | Location | Default | Description |
 |----------|----------|---------|-------------|
-| `MAX_MESSAGES` | `agent/constants.ts` | 40 | Triggers summarization |
-| `MAX_TOOL_ATTEMPTS` | `agent/constants.ts` | 3 | Max tool retries |
-| `SIMILARITY_THRESHOLD` | `sql/SqlMemoryStore.ts` | 0.9 | Deduplication threshold |
+| `MAX_MESSAGES` | `constants.ts` | 40 | Triggers summarization |
+| `STALE_HOURS` | `RedisSessionStore.ts` | 12 | Hours before session summary archival |
+| `TTL` | `RedisSessionStore.ts` | 86400 | Session expiration (24 hours) |
+| `SIMILARITY_THRESHOLD` | `extractKnowledge.ts` | 0.9 | Memory deduplication threshold |
+| `RRF_K` | `DocumentStore.ts` | 60 | RRF fusion constant |
 
-## Limitations
+## Supported File Types
 
-- Single user (no multi-tenancy)
-- No memory decay/expiration
-- No explicit "save this" command
-- Embedding costs for every memory check
+- `.txt` - Plain text
+- `.md` - Markdown
+- `.pdf` - PDF documents
+- `.docx` - Word documents
 
-## Future Improvements
+## Development
 
-- [ ] Add LangSmith tracing
-- [ ] Memory consolidation (merge similar memories)
-- [ ] Explicit write memory tool
-- [ ] Memory importance ranking
-- [ ] Multi-user support with auth
+```bash
+# Lint
+npm run lint
+
+# Format
+npm run format
+
+# Test
+npm run test
+```

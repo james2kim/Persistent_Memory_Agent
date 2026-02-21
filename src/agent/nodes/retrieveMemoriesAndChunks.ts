@@ -14,7 +14,9 @@ export const retrieveMemoriesAndChunks = async (state: AgentState) => {
   const userId = getUserId();
   const queryEmbedding = state.queryEmbedding; // Pre-computed in retrievalGate
 
-  console.log(`[retrieveMemoriesAndChunks] Decision: docs=${decision?.shouldRetrieveDocuments}, mems=${decision?.shouldRetrieveMemories}`);
+  console.log(
+    `[retrieveMemoriesAndChunks] Decision: docs=${decision?.shouldRetrieveDocuments}, mems=${decision?.shouldRetrieveMemories}`
+  );
 
   if (!queryEmbedding) {
     console.log('[retrieveMemoriesAndChunks] No embedding available, skipping retrieval');
@@ -55,6 +57,7 @@ export const retrieveMemoriesAndChunks = async (state: AgentState) => {
           queryEmbedding, // Use pre-computed embedding
           user_id: userId,
           topK: 30,
+          userQuery: state.userQuery,
         },
         {
           maxPerDoc: 4,
@@ -73,7 +76,9 @@ export const retrieveMemoriesAndChunks = async (state: AgentState) => {
   // Run all retrieval tasks in parallel
   await Promise.all(retrievalTasks);
 
-  console.log(`[retrieveMemoriesAndChunks] Retrieved ${documents.length} docs, ${memories.length} memories`);
+  console.log(
+    `[retrieveMemoriesAndChunks] Retrieved ${documents.length} docs, ${memories.length} memories`
+  );
 
   return {
     retrievedContext: {
