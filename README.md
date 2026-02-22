@@ -408,3 +408,40 @@ npm run format
 # Test
 npm run test
 ```
+
+## Retrieval Quality Evaluation
+
+The retrieval pipeline is tested with a dedicated evaluation suite that measures ranking quality.
+
+### Metrics
+
+| Metric | Description | Threshold |
+|--------|-------------|-----------|
+| **MRR** | Mean Reciprocal Rank — average of 1/rank of first relevant result | ≥ 0.65 |
+| **Recall@5** | Fraction of relevant docs appearing in top 5 results | ≥ 0.65 |
+| **Disambiguation** | Correct doc ranks above keyword-similar-but-wrong doc | ≥ 0.70 |
+
+### Test Categories
+
+| Category | What it tests |
+|----------|---------------|
+| Temporal | Date range filtering ("what did I do in 2023") |
+| Semantic | Meaning-based retrieval without exact keywords |
+| Keyword | Direct term matching ("ClickHouse migration") |
+| Study content | Document content retrieval |
+| Disambiguation | Correct doc outranks keyword-similar doc (e.g., "axiom in math" ranks math notes above "Axiom" company resume) |
+| Edge cases | Typos, long queries, single-word queries |
+
+### Running Tests
+
+```bash
+# Seed test data (required once)
+npm run test:seed
+
+# Run retrieval evaluation
+npm run test:retrieval
+```
+
+### Test Fixtures
+
+Test documents and queries are defined in `src/__tests__/fixtures/testDocuments.ts`. Add new test cases as your corpus grows to catch regressions.
