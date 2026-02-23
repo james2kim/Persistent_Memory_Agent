@@ -517,3 +517,125 @@ afterRelevanceFilter: 28  →  afterDedup: 22  →  afterBudget: 8
 - **Single outcome**: Set once at the end of the workflow
 - **Stored in session state**: Flows through AgentState → Redis, expires with session
 - **LangSmith compatible**: Trace data can be attached to LangSmith span metadata
+
+### LangSmith Integration
+
+LangGraph automatically traces all workflow runs to LangSmith when configured.
+
+**Setup:**
+```bash
+# Add to .env.local
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_API_KEY=ls__...
+LANGCHAIN_PROJECT=study-agent
+```
+
+**Custom Metadata:**
+
+The trace utilities convert our domain-specific trace data to LangSmith-compatible metadata:
+
+```typescript
+import { LangSmithUtil } from './util/LangSmithUtil';
+
+// Convert trace to LangSmith metadata
+const metadata = LangSmithUtil.traceToMetadata(trace);
+// {
+//   'agent.traceId': '...',
+//   'agent.outcome': 'success',
+//   'agent.queryType': 'study_content',
+//   'retrieval.embeddingCandidates': 40,
+//   'retrieval.afterBudget': 8,
+//   ...
+// }
+
+// Get a one-line summary for logging
+const summary = LangSmithUtil.traceSummaryLine(trace);
+// "[success] | 1234ms | type=study_content | chunks=8 | memories=2 | dist=0.234"
+
+// Detect quality issues for alerting
+const issues = LangSmithUtil.detectQualityIssues(trace);
+// ['weak_top_match', 'slow_execution']
+```
+
+**Viewing in LangSmith:**
+
+1. Go to your LangSmith project
+2. Filter runs by custom metadata (e.g., `agent.outcome = error`)
+3. Set up alerts for quality issues
+4. Build dashboards tracking `retrieval.*` metrics
+
+### Trace API Endpoint
+
+The server exposes trace data via API:
+
+```bash
+# Get latest trace
+curl http://localhost:3000/api/trace
+
+# Include trace in chat response
+curl -X POST http://localhost:3000/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "What is in my notes?", "includeTrace": true}'
+```
+
+**Response:**
+```json
+{
+  "trace": {
+    "traceId": "abc-123",
+    "outcome": { "status": "success", "durationMs": 1234 },
+    "spans": [...]
+  },
+  "metrics": { "agent.queryType": "study_content", ... },
+  "issues": [],
+  "summary": "[success] | 1234ms | type=study_content | chunks=8"
+}
+```
+
+## Testing
+
+### Test Commands
+
+```bash
+# Run all tests
+npm test
+
+# Run specific test suites
+npm run test:retrieval      # Retrieval quality (MRR, Recall@K)
+npm run test:integration    # Full agent pipeline
+npm run test:seed           # Seed test data (run once before retrieval tests)
+
+# Watch mode for development
+npm run test:watch
+```
+
+### Integration Tests
+
+Integration tests run the full agent pipeline and assert on trace outcomes. These tests hit real APIs (Anthropic, VoyageAI) and require environment variables.
+
+**What the tests verify:**
+
+| Test Category | Assertions |
+|---------------|------------|
+| Trace Outcomes | `success` for valid queries, `clarified` for ambiguous ones |
+| Retrieval Pipeline | Documents retrieved when expected, diagnostics captured |
+| Temporal Filtering | `queryYear` extracted and applied correctly |
+| Performance | Total duration < 30s, no span > 15s |
+| Error Resilience | Minimal/long queries handled gracefully |
+
+**Example test:**
+```typescript
+it('should retrieve documents for study content queries', async () => {
+  const { trace } = await runAgent('What does my resume say?');
+
+  const gateSpan = trace?.spans.find((s) => s.node === 'retrievalGate');
+  expect(gateSpan?.meta.shouldRetrieveDocuments).toBe(true);
+
+  const retrievalSpan = trace?.spans.find((s) => s.node === 'retrieveMemoriesAndChunks');
+  expect(retrievalSpan?.meta.embeddingCandidates).toBeGreaterThan(0);
+});
+```
+
+**Test Configuration:**
+
+Tests use a 60-second timeout (configured in `vitest.config.ts`) to accommodate API latency. Environment variables are loaded via `src/__tests__/setup.ts`.

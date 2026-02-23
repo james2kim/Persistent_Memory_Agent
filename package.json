@@ -14,6 +14,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:retrieval": "vitest run src/__tests__/retrieval.test.ts",
+    "test:integration": "vitest run src/__tests__/integration.test.ts",
     "test:seed": "tsx src/__tests__/seed.ts",
     "migrate": "knex --knexfile knexfile.ts migrate:latest",
     "migrate:rollback": "knex --knexfile knexfile.ts migrate:rollback"

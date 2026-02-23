@@ -19,6 +19,8 @@ import { DocumentStore } from './stores/DocumentStore';
 import { db } from './db/knex';
 import { runBackgroundSummarization } from './agent/backgroundTasks';
 import { MAX_MESSAGES } from './agent/constants';
+import { LangSmithUtil } from './util/LangSmithUtil';
+import type { AgentTrace } from './schemas/types';
 
 // Supported file types
 const SUPPORTED_EXTENSIONS = ['.pdf', '.docx', '.doc', '.md', '.txt'];
@@ -149,19 +151,47 @@ async function getFormattedAnswerToUserinput(userQuery: string) {
 // POST /api/chat - Send a message and get a response
 app.post('/api/chat', async (req, res) => {
   try {
-    const { message } = req.body;
+    const { message, includeTrace } = req.body;
 
     if (!message || typeof message !== 'string') {
       return res.status(400).json({ error: 'Message is required' });
     }
 
     const result = await getFormattedAnswerToUserinput(message);
+    const trace = result?.trace as AgentTrace | undefined;
 
-    // Send response immediately
-    res.json({
+    // Log trace summary
+    if (trace) {
+      console.log(`[trace] ${LangSmithUtil.traceSummaryLine(trace)}`);
+
+      // Check for quality issues
+      const issues = LangSmithUtil.detectQualityIssues(trace);
+      if (issues.length > 0) {
+        console.warn(`[trace] Quality issues detected: ${issues.join(', ')}`);
+      }
+    }
+
+    // Build response
+    const response: Record<string, unknown> = {
       response: result?.response ?? '[No response generated]',
       sessionId,
-    });
+    };
+
+    // Optionally include trace data (for debugging/monitoring)
+    if (includeTrace && trace) {
+      response.trace = {
+        traceId: trace.traceId,
+        outcome: trace.outcome,
+        spans: trace.spans.map((s) => ({
+          node: s.node,
+          durationMs: s.durationMs,
+          meta: s.meta,
+        })),
+        metrics: LangSmithUtil.traceToMetadata(trace),
+      };
+    }
+
+    res.json(response);
 
     // Run background summarization if needed (fire and forget)
     if (result?.messages && result.messages.length >= MAX_MESSAGES) {
@@ -314,6 +344,42 @@ app.get('/api/session', async (req, res) => {
   } catch (err) {
     console.error('Error in /api/session:', err);
     res.status(500).json({ error: 'Failed to get session' });
+  }
+});
+
+// GET /api/trace - Get the latest trace from the session
+app.get('/api/trace', async (req, res) => {
+  try {
+    // Get the latest checkpoint which contains the trace
+    const checkpointKey = `checkpoint:${sessionId}:latest`;
+    const checkpointRaw = await RedisSessionStore.getClient().get(checkpointKey);
+
+    if (!checkpointRaw) {
+      return res.status(404).json({ error: 'No trace found' });
+    }
+
+    const checkpoint = JSON.parse(checkpointRaw);
+    const trace = checkpoint?.checkpoint?.channel_values?.trace as AgentTrace | undefined;
+
+    if (!trace) {
+      return res.status(404).json({ error: 'No trace in checkpoint' });
+    }
+
+    res.json({
+      trace: {
+        traceId: trace.traceId,
+        queryId: trace.queryId,
+        query: trace.query,
+        outcome: trace.outcome,
+        spans: trace.spans,
+      },
+      metrics: LangSmithUtil.traceToMetadata(trace),
+      issues: LangSmithUtil.detectQualityIssues(trace),
+      summary: LangSmithUtil.traceSummaryLine(trace),
+    });
+  } catch (err) {
+    console.error('Error in /api/trace:', err);
+    res.status(500).json({ error: 'Failed to get trace' });
   }
 });
 
