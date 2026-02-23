@@ -1,60 +1,59 @@
 import type { AgentState, DocumentChunk, Memory } from '../../schemas/types';
 import { MemoryUtil } from '../../util/MemoryUtil';
-import { DocumentUtil } from '../../util/DocumentUtil';
+import { DocumentUtil, type RetrievalDiagnostics } from '../../util/DocumentUtil';
 import { DocumentStore } from '../../stores/DocumentStore';
 import { db } from '../../db/knex';
 import { getUserId } from '../../config';
+import { TraceUtil } from '../../util/TraceUtil';
 
 const documentStore = new DocumentStore(db, 1024);
 
 export const retrieveMemoriesAndChunks = async (state: AgentState) => {
-  console.log(`[retrieveMemoriesAndChunks] Starting retrieval`);
+  const span = TraceUtil.startSpan('retrieveMemoriesAndChunks');
+  let trace = state.trace!;
+
   const decision = state.gateDecision;
   const query = state.userQuery;
   const userId = getUserId();
-  const queryEmbedding = state.queryEmbedding; // Pre-computed in retrievalGate
-
-  console.log(
-    `[retrieveMemoriesAndChunks] Decision: docs=${decision?.shouldRetrieveDocuments}, mems=${decision?.shouldRetrieveMemories}`
-  );
+  const queryEmbedding = state.queryEmbedding;
 
   if (!queryEmbedding) {
-    console.log('[retrieveMemoriesAndChunks] No embedding available, skipping retrieval');
+    trace = span.end(trace, {
+      skipped: true,
+      reason: 'no_embedding',
+    });
     return {
       retrievedContext: { documents: [], memories: [] },
+      trace,
     };
   }
 
-  // Build retrieval promises based on what's needed
   const retrievalTasks: Promise<void>[] = [];
   const documents: DocumentChunk[] = [];
   const memories: Memory[] = [];
+  let retrievalDiagnostics: RetrievalDiagnostics | null = null;
 
-  // Memory retrieval task
   if (decision?.shouldRetrieveMemories) {
     retrievalTasks.push(
       MemoryUtil.retrieveRelevantMemories(userId, query, {
         maxResults: 10,
         maxTokens: 800,
         minConfidence: 0.5,
-        queryEmbedding, // Use pre-computed embedding
+        queryEmbedding,
       }).then((result) => {
         if (result.success) {
           memories.push(...result.memories);
-        } else {
-          console.log('[retrieveMemoriesAndChunks] Memory retrieval failed:', result.error_message);
         }
       })
     );
   }
 
-  // Document retrieval task
   if (decision?.shouldRetrieveDocuments) {
     retrievalTasks.push(
       DocumentUtil.retrieveRelevantChunks(
         documentStore,
         {
-          queryEmbedding, // Use pre-computed embedding
+          queryEmbedding,
           user_id: userId,
           topK: 30,
           userQuery: state.userQuery,
@@ -64,26 +63,52 @@ export const retrieveMemoriesAndChunks = async (state: AgentState) => {
           maxChunks: 8,
         }
       )
-        .then((chunks) => {
-          documents.push(...chunks);
+        .then((result) => {
+          documents.push(...result.chunks);
+          retrievalDiagnostics = result.diagnostics;
         })
-        .catch((err) => {
-          console.error('[retrieveMemoriesAndChunks] Document retrieval error:', err);
+        .catch(() => {
+          // Error handled silently, documents will be empty
         })
     );
   }
 
-  // Run all retrieval tasks in parallel
   await Promise.all(retrievalTasks);
 
-  console.log(
-    `[retrieveMemoriesAndChunks] Retrieved ${documents.length} docs, ${memories.length} memories`
-  );
+  // Build trace metadata with richer diagnostics
+  const traceMeta: Record<string, string | number | boolean | null> = {
+    chunksRetrieved: documents.length,
+    memoriesRetrieved: memories.length,
+  };
+
+  if (retrievalDiagnostics !== null) {
+    const diag = retrievalDiagnostics as RetrievalDiagnostics;
+    // Hybrid search stage
+    traceMeta.embeddingCandidates = diag.hybridSearch.embeddingCandidates;
+    traceMeta.keywordCandidates = diag.hybridSearch.keywordCandidates;
+    traceMeta.fusionOverlap = diag.hybridSearch.overlapCount;
+    traceMeta.fusedCount = diag.hybridSearch.fusedCount;
+    // Pipeline stages
+    traceMeta.afterRelevanceFilter = diag.afterRelevanceFilter;
+    traceMeta.afterDedup = diag.afterDedup;
+    traceMeta.afterBudget = diag.afterBudget;
+    // Quality signals
+    traceMeta.topChunkDistance = diag.topChunkDistance;
+    traceMeta.topEmbeddingDistance = diag.hybridSearch.topEmbeddingDistance;
+    traceMeta.scoreSpread = diag.scoreSpread;
+    traceMeta.uniqueDocuments = diag.uniqueDocuments;
+    // Temporal
+    traceMeta.temporalFilterApplied = diag.temporalFilterApplied;
+    traceMeta.queryYear = diag.queryYear;
+  }
+
+  trace = span.end(trace, traceMeta);
 
   return {
     retrievedContext: {
       documents,
       memories,
     },
+    trace,
   };
 };

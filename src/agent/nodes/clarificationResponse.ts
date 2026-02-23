@@ -1,5 +1,6 @@
 import type { AgentState } from '../../schemas/types';
 import { haikuModel } from '../constants';
+import { TraceUtil } from '../../util/TraceUtil';
 
 const CLARIFICATION_SYSTEM_MESSAGE = `You are a Study Assistant Agent. The user asked something that is outside your core domain or requires clarification.
 
@@ -16,6 +17,9 @@ Examples:
 - "That's outside my wheelhouse. Anything study-related I can help with?"`;
 
 export const clarificationResponse = async (state: AgentState) => {
+  const span = TraceUtil.startSpan('clarificationResponse');
+  let trace = state.trace!;
+
   const aiMessage = await haikuModel.invoke([
     { role: 'system', content: CLARIFICATION_SYSTEM_MESSAGE },
     { role: 'user', content: state.userQuery },
@@ -24,8 +28,20 @@ export const clarificationResponse = async (state: AgentState) => {
   const response =
     typeof aiMessage.content === 'string' ? aiMessage.content : JSON.stringify(aiMessage.content);
 
+  trace = span.end(trace, {
+    responseLength: response.length,
+  });
+
+  // Set final outcome - clarification requested
+  trace = TraceUtil.setOutcome(trace, {
+    status: 'clarified',
+    reason: 'ambiguous_or_off_topic',
+    triggeringSpan: 'retrievalGate',
+  });
+
   return {
     messages: [aiMessage],
     response,
+    trace,
   };
 };

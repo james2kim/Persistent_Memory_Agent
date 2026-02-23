@@ -445,3 +445,75 @@ npm run test:retrieval
 ### Test Fixtures
 
 Test documents and queries are defined in `src/__tests__/fixtures/testDocuments.ts`. Add new test cases as your corpus grows to catch regressions.
+
+## Agent Tracing
+
+The agent includes an internal tracing system that captures structured spans for each node in the workflow.
+
+### Trace Structure
+
+```typescript
+interface AgentTrace {
+  traceId: string;
+  queryId: string;
+  query: string;
+  startTime: number;
+  spans: TraceSpan[];      // Append-only, each node adds one
+  outcome: TraceOutcome;   // Set once at the end
+}
+
+interface TraceSpan {
+  node: string;            // 'retrievalGate', 'hybridSearch', etc.
+  startTime: number;
+  durationMs: number;
+  meta: Record<string, string | number | boolean | null>;
+}
+
+interface TraceOutcome {
+  status: 'success' | 'refused' | 'clarified' | 'error';
+  reason?: string;
+  triggeringSpan?: string;
+  durationMs: number;
+}
+```
+
+### What Each Node Captures
+
+| Node | Metadata |
+|------|----------|
+| `retrievalGate` | queryType, ambiguity, shouldRetrieveDocuments, shouldRetrieveMemories |
+| `retrieveMemoriesAndChunks` | See detailed breakdown below |
+| `injectContext` | documentsUsed, memoriesUsed, contextTokens, responseLength |
+| `extractAndStoreKnowledge` | contentType, memoriesAdded, studyMaterialIngested |
+| `clarificationResponse` | responseLength |
+
+### Retrieval Diagnostics
+
+The `retrieveMemoriesAndChunks` node captures detailed pipeline diagnostics to pinpoint where retrieval quality degrades:
+
+| Stage | Metrics | What it tells you |
+|-------|---------|-------------------|
+| **Hybrid Search** | `embeddingCandidates`, `keywordCandidates`, `fusionOverlap`, `fusedCount`, `topEmbeddingDistance` | How many chunks each search found, overlap between them |
+| **Pipeline** | `afterRelevanceFilter`, `afterDedup`, `afterBudget` | Chunk counts after each filtering stage |
+| **Quality** | `topChunkDistance`, `scoreSpread`, `uniqueDocuments` | Confidence signals for retrieval quality |
+| **Temporal** | `temporalFilterApplied`, `queryYear` | Whether date filtering was used |
+
+**Example trace for debugging:**
+```
+embeddingCandidates: 40  →  keywordCandidates: 12  →  fusedCount: 35
+    ↓
+afterRelevanceFilter: 28  →  afterDedup: 22  →  afterBudget: 8
+```
+
+**Interpreting the diagnostics:**
+- High `embeddingCandidates` but low `afterRelevanceFilter` → relevance rules too strict
+- High `afterDedup` but low `afterBudget` → budget constraints cutting relevant chunks
+- Large `scoreSpread` → retrieved chunks have varying quality
+- `fusionOverlap` near 0 → embedding and keyword searches found different results (query ambiguity)
+
+### Design Principles
+
+- **Append-only spans**: Each node pushes its span, never mutates previous spans
+- **Single outcome**: Set once at the end of the workflow
+- **Stored in session state**: Flows through AgentState → Redis, expires with session
+- **LangSmith compatible**: Trace data can be attached to LangSmith span metadata

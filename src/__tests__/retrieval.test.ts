@@ -64,7 +64,7 @@ function calculateRecallAtK(chunks: RetrievedChunk[], relevantDocIds: string[], 
 
 async function evaluateQuery(testQuery: (typeof TEST_QUERIES)[0]) {
   const embedding = await defaultEmbedding.embedText(testQuery.query, 'query');
-  const chunks = await DocumentUtil.retrieveRelevantChunks(
+  const { chunks } = await DocumentUtil.retrieveRelevantChunks(
     documentStore,
     {
       queryEmbedding: embedding,
@@ -154,7 +154,7 @@ describe('Retrieval Quality Evaluation', () => {
 
       for (const testQuery of disambigQueries) {
         const embedding = await defaultEmbedding.embedText(testQuery.query, 'query');
-        const chunks = await DocumentUtil.retrieveRelevantChunks(
+        const { chunks } = await DocumentUtil.retrieveRelevantChunks(
           documentStore,
           {
             queryEmbedding: embedding,

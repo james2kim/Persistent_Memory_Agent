@@ -3,7 +3,7 @@ import { DocumentStore } from '../stores/DocumentStore';
 import type { IngestDocument, RawChunk } from '../schemas/types';
 import { defaultEmbedding } from '../services/EmbeddingService';
 import { DocumentUtil } from '../util/DocumentUtil';
-import { extractTemporalRange } from '../util/TemporalUtil';
+import { TemporalUtil } from '../util/TemporalUtil';
 
 // simple concurrency limiter (no deps)
 async function mapLimit<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R>): Promise<R[]> {
@@ -42,7 +42,7 @@ export async function ingestDocument(
 
     const embeddedChunks = await mapLimit(rawChunks, 4, async (c) => {
       const embedding = await defaultEmbedding.embedText(c.content, 'document');
-      const temporal = extractTemporalRange(c.content);
+      const temporal = TemporalUtil.extractTemporalRange(c.content);
       return {
         chunk_index: c.chunk_index,
         content: c.content,

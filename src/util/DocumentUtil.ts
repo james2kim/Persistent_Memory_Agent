@@ -1,7 +1,22 @@
 import { RecursiveCharacterTextSplitter } from '@langchain/textsplitters';
 import type { RawChunk, RetrievedChunk, DocumentChunk } from '../schemas/types';
-import type { DocumentStore } from '../stores/DocumentStore';
-import { extractQueryYear } from './TemporalUtil';
+import type { DocumentStore, HybridSearchDiagnostics } from '../stores/DocumentStore';
+import { TemporalUtil } from './TemporalUtil';
+
+export type RetrievalDiagnostics = {
+  // Hybrid search stage
+  hybridSearch: HybridSearchDiagnostics;
+  // Pipeline stages
+  afterRelevanceFilter: number;
+  afterDedup: number;
+  afterBudget: number;
+  // Quality signals
+  topChunkDistance: number;
+  scoreSpread: number; // difference between top and bottom chunk distances
+  uniqueDocuments: number;
+  temporalFilterApplied: boolean;
+  queryYear: number | null;
+};
 
 // Budget constraints for document retrieval
 const DEFAULT_BUDGET = {
@@ -191,6 +206,8 @@ export const DocumentUtil = {
    * 2. Filter by relevance rules
    * 3. Remove near-duplicate chunks
    * 4. Apply budget constraints
+   *
+   * Returns chunks and diagnostics for observability.
    */
   async retrieveRelevantChunks(
     store: DocumentStore,
@@ -201,17 +218,14 @@ export const DocumentUtil = {
       userQuery: string;
     },
     budgetOptions?: BudgetOptions
-  ): Promise<DocumentChunk[]> {
+  ): Promise<{ chunks: DocumentChunk[]; diagnostics: RetrievalDiagnostics }> {
     const topK = input.topK ?? 20;
 
     // Extract year from query for temporal filtering
-    const filterYear = extractQueryYear(input.userQuery);
-    if (filterYear) {
-      console.log(`[pipeline] Temporal filter: year=${filterYear}`);
-    }
+    const filterYear = TemporalUtil.extractQueryYear(input.userQuery);
 
     // 1. Hybrid search: embedding similarity + keyword matching
-    const rawChunks = await store.hybridSearch({
+    const { chunks: rawChunks, diagnostics: hybridDiagnostics } = await store.hybridSearch({
       query: input.userQuery,
       queryEmbedding: input.queryEmbedding,
       user_id: input.user_id,
@@ -220,7 +234,20 @@ export const DocumentUtil = {
     });
 
     if (rawChunks.length === 0) {
-      return [];
+      return {
+        chunks: [],
+        diagnostics: {
+          hybridSearch: hybridDiagnostics,
+          afterRelevanceFilter: 0,
+          afterDedup: 0,
+          afterBudget: 0,
+          topChunkDistance: -1,
+          scoreSpread: 0,
+          uniqueDocuments: 0,
+          temporalFilterApplied: filterYear !== null,
+          queryYear: filterYear,
+        },
+      };
     }
 
     // Extended type to carry distance and document info through pipeline
@@ -244,21 +271,12 @@ export const DocumentUtil = {
       distance: chunk.distance,
     }));
 
-    // Debug: check if Axiom chunk is in raw results
-    const hasAxiomRaw = extendedChunks.some((c) => c.content.includes('Axiom'));
-    console.log(`[pipeline] Raw chunks: ${extendedChunks.length}, has Axiom: ${hasAxiomRaw}`);
-
     // 2. Filter by relevance rules
     const relevant = extendedChunks.filter((chunk) => this.passRelevanceRules(chunk));
-    const hasAxiomRelevant = relevant.some((c) => c.content.includes('Axiom'));
-    console.log(
-      `[pipeline] After relevance filter: ${relevant.length}, has Axiom: ${hasAxiomRelevant}`
-    );
 
     // 3. Remove near-duplicates (cast to RetrievedChunk for the function, then back)
     const deduped = this.removeDuplicateChunks(relevant) as ChunkWithDistance[];
-    const hasAxiomDeduped = deduped.some((c) => c.content.includes('Axiom'));
-    console.log(`[pipeline] After dedup: ${deduped.length}, has Axiom: ${hasAxiomDeduped}`);
+
     // 4. Convert to DocumentChunk format for budget application
     const documentChunks: DocumentChunk[] = deduped.map((chunk) => ({
       id: chunk.id,
@@ -276,7 +294,26 @@ export const DocumentUtil = {
       confidence: Math.max(0, 1 - chunk.distance),
     }));
 
-    // 6. Apply budget constraints (keeps first N = most relevant)
-    return this.applyBudget(documentChunks, budgetOptions);
+    // 5. Apply budget constraints (keeps first N = most relevant)
+    const finalChunks = this.applyBudget(documentChunks, budgetOptions);
+
+    // Calculate diagnostics
+    const topChunkDistance = finalChunks.length > 0 ? finalChunks[0].distance : -1;
+    const bottomChunkDistance = finalChunks.length > 0 ? finalChunks[finalChunks.length - 1].distance : -1;
+    const uniqueDocIds = new Set(finalChunks.map((c) => c.document_id));
+
+    const diagnostics: RetrievalDiagnostics = {
+      hybridSearch: hybridDiagnostics,
+      afterRelevanceFilter: relevant.length,
+      afterDedup: deduped.length,
+      afterBudget: finalChunks.length,
+      topChunkDistance,
+      scoreSpread: bottomChunkDistance - topChunkDistance,
+      uniqueDocuments: uniqueDocIds.size,
+      temporalFilterApplied: filterYear !== null,
+      queryYear: filterYear,
+    };
+
+    return { chunks: finalChunks, diagnostics };
   },
 };

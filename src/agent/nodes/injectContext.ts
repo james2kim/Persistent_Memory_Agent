@@ -1,17 +1,17 @@
 import type { AgentState } from '../../schemas/types';
 import { sonnetModel } from '../constants';
 import { SYSTEM_MESSAGE, buildContextBlock } from '../../llm/promptBuilder';
+import { TraceUtil } from '../../util/TraceUtil';
 
 export const injectContext = async (state: AgentState) => {
+  const span = TraceUtil.startSpan('injectContext');
+  let trace = state.trace!;
+
   const documents = state.retrievedContext?.documents ?? [];
   const memories = state.retrievedContext?.memories ?? [];
 
-  console.log(`[injectContext] Documents: ${documents.length}, Memories: ${memories.length}`);
-
   const contextBlock = buildContextBlock(documents, memories);
-  console.log(
-    `[injectContext] Context block: ${contextBlock ? contextBlock.length + ' chars' : 'null'}`
-  );
+  const contextTokens = contextBlock ? Math.ceil(contextBlock.length / 4) : 0;
 
   const userQuery = state.userQuery;
 
@@ -35,8 +35,17 @@ export const injectContext = async (state: AgentState) => {
   const response =
     typeof aiMessage.content === 'string' ? aiMessage.content : JSON.stringify(aiMessage.content);
 
+  trace = span.end(trace, {
+    documentsUsed: documents.length,
+    memoriesUsed: memories.length,
+    contextTokens,
+    hasContext: contextBlock !== null,
+    responseLength: response.length,
+  });
+
   return {
     messages: [aiMessage],
     response,
+    trace,
   };
 };

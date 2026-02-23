@@ -205,7 +205,10 @@ export class DocumentStore {
       filterYear?: number;
     },
     trx?: Knex.Transaction
-  ) {
+  ): Promise<{
+    chunks: Awaited<ReturnType<DocumentStore['listChunksBySimilarity']>>;
+    diagnostics: HybridSearchDiagnostics;
+  }> {
     // Run both searches in parallel
     const [embeddingResults, keywordResults] = await Promise.all([
       this.listChunksBySimilarity(
@@ -252,10 +255,32 @@ export class DocumentStore {
       .sort((a, b) => b.score - a.score)
       .slice(0, input.topK);
 
-    console.log(
-      `[hybrid] Embedding: ${embeddingResults.length}, Keyword: ${keywordResults.length}, Fused: ${sorted.length}`
-    );
+    // Calculate overlap (chunks found by both searches)
+    const embeddingIds = new Set(embeddingResults.map((c) => c.id));
+    const keywordIds = new Set(keywordResults.map((c) => c.id));
+    const overlapCount = [...embeddingIds].filter((id) => keywordIds.has(id)).length;
 
-    return sorted.map((s) => s.chunk);
+    const diagnostics: HybridSearchDiagnostics = {
+      embeddingCandidates: embeddingResults.length,
+      keywordCandidates: keywordResults.length,
+      overlapCount,
+      fusedCount: sorted.length,
+      topEmbeddingDistance: embeddingResults[0]?.distance ?? -1,
+      topKeywordRank: keywordResults.length > 0 ? 1 : -1,
+    };
+
+    return {
+      chunks: sorted.map((s) => s.chunk),
+      diagnostics,
+    };
   }
 }
+
+export type HybridSearchDiagnostics = {
+  embeddingCandidates: number;
+  keywordCandidates: number;
+  overlapCount: number;
+  fusedCount: number;
+  topEmbeddingDistance: number;
+  topKeywordRank: number;
+};

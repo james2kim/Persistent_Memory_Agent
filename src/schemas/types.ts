@@ -194,6 +194,30 @@ export const summarizationSchema = z.object({
   content: z.string().min(50).max(2500),
 });
 
+// --- Agent Trace Schemas ---
+export const traceSpanSchema = z.object({
+  node: z.string(),
+  startTime: z.number(),
+  durationMs: z.number(),
+  meta: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])),
+});
+
+export const traceOutcomeSchema = z.object({
+  status: z.enum(['success', 'refused', 'clarified', 'error']),
+  reason: z.string().optional(),
+  triggeringSpan: z.string().optional(),
+  durationMs: z.number(),
+});
+
+export const agentTraceSchema = z.object({
+  traceId: z.string(),
+  queryId: z.string(),
+  query: z.string(),
+  startTime: z.number(),
+  spans: z.array(traceSpanSchema),
+  outcome: traceOutcomeSchema.nullable(),
+});
+
 // --- Message Schema ---
 export const MessageSchema = z.object({
   id: z.string(),
@@ -236,13 +260,14 @@ export const AgentStateSchema = new StateSchema({
   sessionId: z.string(),
   userId: z.string(),
   gateDecision: retrievalGateDecisionSchema.optional(),
-  queryEmbedding: z.array(z.number()).optional(), // Pre-computed for parallel retrieval
+  queryEmbedding: z.array(z.number()).optional(),
   retrievedContext: z
     .object({
       documents: z.array(rerankedChunkSchema).default([]),
       memories: z.array(memorySchema).default([]),
     })
     .optional(),
+  trace: agentTraceSchema.optional(),
 });
 
 // ============================================================================
@@ -279,3 +304,8 @@ export type Message = z.infer<typeof MessageSchema>;
 export type SessionState = z.infer<typeof SessionStateSchema>;
 export type RedisOptions = z.infer<typeof RedisOptionsSchema>;
 export type AgentState = typeof AgentStateSchema.State;
+
+// --- Trace Types ---
+export type TraceSpan = z.infer<typeof traceSpanSchema>;
+export type TraceOutcome = z.infer<typeof traceOutcomeSchema>;
+export type AgentTrace = z.infer<typeof agentTraceSchema>;
