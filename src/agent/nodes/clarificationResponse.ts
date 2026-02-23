@@ -39,6 +39,9 @@ export const clarificationResponse = async (state: AgentState) => {
     triggeringSpan: 'retrievalGate',
   });
 
+  // Prune trace at the end of the workflow to prevent bloat
+  trace = TraceUtil.pruneTrace(trace);
+
   return {
     messages: [aiMessage],
     response,

@@ -85,5 +85,8 @@ export const extractAndStoreKnowledge = async (state: AgentState) => {
     status: 'success',
   });
 
+  // Prune trace at the end of the workflow to prevent bloat
+  trace = TraceUtil.pruneTrace(trace);
+
   return { trace };
 };

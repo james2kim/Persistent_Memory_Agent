@@ -102,6 +102,12 @@ export const retrieveMemoriesAndChunks = async (state: AgentState) => {
     traceMeta.queryYear = diag.queryYear;
   }
 
+  // Add pruned candidate summaries (no full content, just ids + scores + snippets)
+  if (documents.length > 0) {
+    const candidateSummaries = TraceUtil.createCandidateSummaries(documents);
+    traceMeta.topCandidates = JSON.stringify(candidateSummaries);
+  }
+
   trace = span.end(trace, traceMeta);
 
   return {

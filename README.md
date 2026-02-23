@@ -518,6 +518,56 @@ afterRelevanceFilter: 28  →  afterDedup: 22  →  afterBudget: 8
 - **Stored in session state**: Flows through AgentState → Redis, expires with session
 - **LangSmith compatible**: Trace data can be attached to LangSmith span metadata
 
+### Trace Pruning
+
+Traces are for observability, not a secondary memory system. Automatic pruning prevents bloat:
+
+| Limit | Value | Purpose |
+|-------|-------|---------|
+| `MAX_RUNS_PER_SESSION` | 50 | Cap trace history per session |
+| `MAX_SPANS_PER_RUN` | 100 | Limit events per trace |
+| `MAX_CANDIDATES_PER_RETRIEVAL` | 10 | Limit logged chunk candidates |
+| `MAX_BYTES_PER_RUN` | 100 KB | Hard cap on trace size |
+| `MAX_SNIPPET_LENGTH` | 100 chars | Truncate content in candidates |
+| `MAX_QUERY_LENGTH` | 500 chars | Truncate long queries |
+
+**When pruning happens:**
+
+Pruning occurs at the **end of the workflow** in terminal nodes (`extractAndStoreKnowledge` and `clarificationResponse`), after the outcome is set but before the trace is returned. This ensures the complete trace is captured before pruning.
+
+**What gets pruned:**
+- Raw chunk content → replaced with short snippets
+- Full embeddings → dropped entirely
+- Large metadata values → truncated to 200 chars
+- Old spans → only most recent N kept
+
+**Candidate summaries:**
+
+Instead of storing full chunk data, traces store lightweight summaries:
+
+```typescript
+type CandidateSummary = {
+  id: string;
+  documentId: string;
+  score: number;      // distance or confidence
+  snippet: string;    // first 100 chars
+};
+```
+
+**Usage:**
+```typescript
+import { TraceUtil, TRACE_LIMITS } from './util/TraceUtil';
+
+// Create pruned candidate summaries
+const summaries = TraceUtil.createCandidateSummaries(chunks);
+
+// Prune a trace before storage
+const prunedTrace = TraceUtil.pruneTrace(trace);
+
+// Prune session trace history
+const prunedHistory = TraceUtil.pruneSessionTraces(traces);
+```
+
 ### LangSmith Integration
 
 LangGraph automatically traces all workflow runs to LangSmith when configured.
