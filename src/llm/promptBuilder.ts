@@ -69,6 +69,7 @@ export const buildContextBlock = (
     // Sort by confidence, then apply U-shape distribution
     const sorted = [...documents].sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0));
     const distributed = distributeUShape(sorted);
+
     const docContext = distributed
       .map((d) => {
         const title = d.document_title || d.document_source || `chunk ${d.chunk_index}`;

@@ -20,6 +20,7 @@ import { db } from './db/knex';
 import { runBackgroundSummarization } from './agent/backgroundTasks';
 import { MAX_MESSAGES } from './agent/constants';
 import { LangSmithUtil } from './util/LangSmithUtil';
+import { TitleExtractor } from './util/TitleExtractor';
 import type { AgentTrace } from './schemas/types';
 
 // Supported file types
@@ -39,12 +40,17 @@ function bufferToBlob(buffer: Buffer, type: string): Blob {
   return new Blob([uint8Array], { type });
 }
 
+type ExtractedContent = {
+  text: string;
+  pdfTitle?: string; // Title from PDF metadata if available
+};
+
 // Extract text from uploaded file using LangChain loaders
 async function extractTextFromFile(
   buffer: Buffer,
   originalname: string,
   mimetype: string
-): Promise<string> {
+): Promise<ExtractedContent> {
   const ext = path.extname(originalname).toLowerCase();
 
   // PDF files
@@ -52,7 +58,12 @@ async function extractTextFromFile(
     const blob = bufferToBlob(buffer, 'application/pdf');
     const loader = new PDFLoader(blob, { splitPages: false });
     const docs = await loader.load();
-    return docs.map((doc) => doc.pageContent).join('\n\n');
+    const text = docs.map((doc) => doc.pageContent).join('\n\n');
+
+    // Try to get title from PDF metadata
+    const pdfTitle = docs[0]?.metadata?.pdf?.info?.Title as string | undefined;
+
+    return { text, pdfTitle };
   }
 
   // Word documents (.docx)
@@ -66,7 +77,7 @@ async function extractTextFromFile(
     );
     const loader = new DocxLoader(blob);
     const docs = await loader.load();
-    return docs.map((doc) => doc.pageContent).join('\n\n');
+    return { text: docs.map((doc) => doc.pageContent).join('\n\n') };
   }
 
   // Legacy .doc files - try DocxLoader (may not work for all .doc files)
@@ -74,7 +85,7 @@ async function extractTextFromFile(
     const blob = bufferToBlob(buffer, 'application/msword');
     const loader = new DocxLoader(blob);
     const docs = await loader.load();
-    return docs.map((doc) => doc.pageContent).join('\n\n');
+    return { text: docs.map((doc) => doc.pageContent).join('\n\n') };
   }
 
   // Markdown and plain text files
@@ -84,7 +95,7 @@ async function extractTextFromFile(
     mimetype === 'text/markdown' ||
     mimetype === 'text/plain'
   ) {
-    return buffer.toString('utf-8');
+    return { text: buffer.toString('utf-8') };
   }
 
   throw new Error(`Unsupported file type: ${ext || mimetype}`);
@@ -227,7 +238,7 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
     }
 
     // Extract text using LangChain loaders
-    const textContent = await extractTextFromFile(buffer, originalname, mimetype);
+    const { text: textContent, pdfTitle } = await extractTextFromFile(buffer, originalname, mimetype);
 
     if (!textContent || textContent.trim().length === 0) {
       return res.status(400).json({
@@ -235,12 +246,16 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
       });
     }
 
+    // Extract title: PDF metadata > heuristics > filename
+    const extractedTitle = pdfTitle || TitleExtractor.extractTitle(textContent, originalname);
+    console.log(`[upload] Title: "${extractedTitle}" (from PDF metadata: ${!!pdfTitle})`);
+
     const result = await ingestDocument(
       db,
       { documents: documentStore },
       {
         source: originalname,
-        title: originalname,
+        title: extractedTitle,
         text: textContent,
         metadata: {
           uploadedAt: new Date().toISOString(),
@@ -256,6 +271,7 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
       documentId: result.documentId,
       chunkCount: result.chunkCount,
       filename: originalname,
+      title: extractedTitle,
     });
   } catch (err) {
     console.error('Error in /api/upload:', err);

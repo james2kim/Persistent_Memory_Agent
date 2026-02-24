@@ -644,6 +644,27 @@ curl -X POST http://localhost:3000/api/chat \
 
 ## Testing
 
+### Test Strategy
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        Vitest (CI)                              │
+│  Mechanical correctness - "Does it work?"                       │
+├─────────────────────────────────────────────────────────────────┤
+│  test:unit       │ Pure functions (applyBudget, cosineSim)     │
+│  test:smoke      │ Happy/alternate path - pipeline wired right │
+│  test:retrieval  │ MRR, Recall@K - retrieval ranking quality   │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│                    LangSmith (Scheduled)                        │
+│  Quality evaluation - "Is it good?"                             │
+├─────────────────────────────────────────────────────────────────┤
+│  Response correctness, helpfulness, grounding                   │
+│  Golden dataset regression, A/B experiments                     │
+└─────────────────────────────────────────────────────────────────┘
+```
+
 ### Test Commands
 
 ```bash
@@ -651,13 +672,41 @@ curl -X POST http://localhost:3000/api/chat \
 npm test
 
 # Run specific test suites
-npm run test:retrieval      # Retrieval quality (MRR, Recall@K)
-npm run test:integration    # Full agent pipeline
+npm run test:unit           # Fast unit tests (~200ms)
+npm run test:smoke          # End-to-end smoke tests (~20s)
+npm run test:retrieval      # Retrieval quality metrics (~2s)
+npm run test:integration    # Comprehensive pipeline tests (~2min)
+
+# Setup
 npm run test:seed           # Seed test data (run once before retrieval tests)
 
 # Watch mode for development
 npm run test:watch
 ```
+
+### Smoke Tests
+
+Minimal end-to-end tests to verify the agent pipeline is wired correctly.
+
+| Test | Path | Verifies |
+|------|------|----------|
+| Happy path | Gate → Retrieval → Context → Extract | Full pipeline executes, success outcome |
+| Alternate path | Gate → Context (skip retrieval) | Conversational queries skip retrieval correctly |
+
+These are NOT quality evaluations — they just verify the pipeline doesn't break.
+
+### Unit Tests
+
+Unit tests for pure utility functions run fast (~200ms) with no external dependencies.
+
+**`documentUtil.test.ts`** - 28 tests covering:
+
+| Function | Tests |
+|----------|-------|
+| `applyBudget` | `maxChunks`, `maxPerDoc`, `maxContextTokens`, `maxChunkTokens`, combined constraints, empty input |
+| `estimateTokens` | ~4 chars/token heuristic, empty string, rounding, whitespace handling |
+| `cosineSimilarity` | Identical vectors (1.0), orthogonal (0.0), opposite (-1.0), symmetry, high-dimensional, zero vectors |
+| `removeDuplicateChunks` | High similarity removal, threshold behavior, missing embeddings |
 
 ### Integration Tests
 
