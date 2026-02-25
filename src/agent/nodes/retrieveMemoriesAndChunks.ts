@@ -36,8 +36,8 @@ export const retrieveMemoriesAndChunks = async (state: AgentState) => {
   if (decision?.shouldRetrieveMemories) {
     retrievalTasks.push(
       MemoryUtil.retrieveRelevantMemories(userId, query, {
-        maxResults: 10,
-        maxTokens: 800,
+        maxResults: 6,
+        maxTokens: 500,
         minConfidence: 0.5,
         queryEmbedding,
       }).then((result) => {

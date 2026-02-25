@@ -138,22 +138,16 @@ export const IngestDocumentSchema = z.object({
 
 // --- Retrieval Gate Schemas ---
 export const retrievalGateAssessmentSchema = z.object({
-  queryType: z
-    .enum(['personal', 'study_content', 'general_knowledge', 'conversational', 'off_topic'])
-    .describe(
-      'personal=about user, study_content=about uploaded materials, general_knowledge=common facts, conversational=greetings/chitchat, off_topic=outside study assistant domain (stocks, medical, legal advice)'
-    ),
-  ambiguity: z.enum(['low', 'moderate', 'high']).describe('How clear is the query intent?'),
-  riskWithoutRetrieval: z
-    .enum(['low', 'moderate', 'high'])
-    .describe('Risk of incorrect/incomplete answer if we skip retrieval'),
-  referencesPersonalContext: z
-    .boolean()
-    .describe('Does query reference user goals, preferences, past decisions, or personal facts?'),
-  referencesUploadedContent: z
-    .boolean()
-    .describe('Does query reference documents, notes, papers, or study materials?'),
-  reasoning: z.string().min(10).max(500).describe('Brief explanation of the assessment'),
+  queryType: z.enum([
+    'study_content',
+    'personal',
+    'general_knowledge',
+    'conversational',
+    'off_topic',
+    'unclear',
+  ]),
+  referencesPersonalContext: z.boolean(),
+  reasoning: z.string(),
 });
 
 export const retrievalGateDecisionSchema = z.object({

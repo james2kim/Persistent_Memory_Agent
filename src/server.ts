@@ -205,14 +205,14 @@ app.post('/api/chat', async (req, res) => {
     res.json(response);
 
     // Run background summarization if needed (fire and forget)
+
     if (result?.messages && result.messages.length >= MAX_MESSAGES) {
-      console.log(`[/api/chat] Triggering background summarization (${result.messages.length} messages)`);
-      runBackgroundSummarization(
-        sessionId,
-        userId,
-        result.messages,
-        result.summary ?? ''
-      ).catch((err) => console.error('[/api/chat] Background summarization error:', err));
+      console.log(
+        `[/api/chat] Triggering background summarization (${result.messages.length} messages)`
+      );
+      runBackgroundSummarization(sessionId, userId, result.messages, result.summary ?? '').catch(
+        (err) => console.error('[/api/chat] Background summarization error:', err)
+      );
     }
   } catch (err) {
     console.error('Error in /api/chat:', err);
@@ -238,7 +238,11 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
     }
 
     // Extract text using LangChain loaders
-    const { text: textContent, pdfTitle } = await extractTextFromFile(buffer, originalname, mimetype);
+    const { text: textContent, pdfTitle } = await extractTextFromFile(
+      buffer,
+      originalname,
+      mimetype
+    );
 
     if (!textContent || textContent.trim().length === 0) {
       return res.status(400).json({
@@ -322,7 +326,7 @@ app.get('/api/session', async (req, res) => {
         // { id: ["langchain_core", "messages", "HumanMessage"], kwargs: { content: "..." } }
         const msgId = m.id as string[] | undefined;
         const kwargs = m.kwargs as Record<string, unknown> | undefined;
-        const msgType = Array.isArray(msgId) ? (msgId[2]?.toLowerCase() || '') : '';
+        const msgType = Array.isArray(msgId) ? msgId[2]?.toLowerCase() || '' : '';
 
         // Determine role
         let role = 'system';

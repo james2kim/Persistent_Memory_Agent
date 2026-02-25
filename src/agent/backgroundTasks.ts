@@ -5,7 +5,11 @@ import type { BaseMessage } from '@langchain/core/messages';
 
 /**
  * Runs summarization in the background without blocking the response.
- * Called after the main response is sent to the user.
+ * Called when message count reaches MAX_MESSAGES (40).
+ *
+ * Strategy:
+ * - Summarize oldest 20 messages (merge with existing summary)
+ * - Prune to keep newest 20 messages
  */
 export async function runBackgroundSummarization(
   sessionId: string,
@@ -19,16 +23,16 @@ export async function runBackgroundSummarization(
       `[backgroundSummarization] Messages: ${messages.length}, Summary length: ${currentSummary.length}`
     );
 
-    // Determine how many messages to summarize (first half)
-    const cutIndex = Math.floor(MAX_MESSAGES / 2);
-    const messagesToSummarize = messages.slice(0, cutIndex);
-    const messagesToKeep = messages.slice(cutIndex);
+    // Split: oldest half to summarize, newest half to keep
+    const halfPoint = Math.floor(MAX_MESSAGES / 2);
+    const messagesToSummarize = messages.slice(0, halfPoint);
+    const messagesToKeep = messages.slice(-halfPoint);
 
     console.log(
-      `[backgroundSummarization] Summarizing ${messagesToSummarize.length} messages, keeping ${messagesToKeep.length}`
+      `[backgroundSummarization] Summarizing oldest ${messagesToSummarize.length} messages, keeping newest ${messagesToKeep.length}`
     );
 
-    // Run summarization
+    // Summarize oldest messages + merge with existing summary
     const result = await summarize(currentSummary, messagesToSummarize);
 
     console.log(`[backgroundSummarization] New summary length: ${result.content.length}`);
@@ -50,7 +54,6 @@ export async function runBackgroundSummarization(
         await RedisSessionStore.writeSession(sessionId, {
           ...state,
           summary: result.content,
-          // Convert BaseMessages to plain objects for session store
           messages: messagesToKeep.map((m) => ({
             id: (m.id as string) ?? '',
             role: m.constructor.name === 'HumanMessage' ? 'user' : 'assistant',
