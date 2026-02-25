@@ -42,7 +42,7 @@ export const injectContext = async (state: AgentState) => {
     hasContext: contextBlock !== null,
     responseLength: response.length,
   });
-
+  console.log('triggered');
   return {
     messages: [aiMessage],
     response,

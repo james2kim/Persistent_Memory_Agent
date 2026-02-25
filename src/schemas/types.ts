@@ -247,10 +247,26 @@ export const RedisOptionsSchema = z.object({
   keyPrefix: z.string().optional(),
 });
 
+// --- Final Action Schema (for structured eval output) ---
+export const finalActionSchema = z.enum(['ANSWER', 'REFUSE', 'CLARIFY', 'EXPAND_RETRIEVAL']);
+
+// --- Trace Summary Schema (lightweight trace for evals) ---
+export const traceSummarySchema = z.object({
+  traceId: z.string(),
+  queryType: z.string().optional(),
+  outcome: z.string().optional(),
+  durationMs: z.number().optional(),
+  documentsRetrieved: z.number().optional(),
+  memoriesRetrieved: z.number().optional(),
+  didRetrieval: z.boolean().optional(),
+});
+
 // --- Agent State Schema ---
 export const AgentStateSchema = new StateSchema({
   messages: MessagesValue,
   response: z.string().optional(),
+  finalAction: finalActionSchema.optional(),
+  traceSummary: traceSummarySchema.optional(),
   taskState: z.object({
     attempts: z.number(),
   }),
@@ -309,3 +325,5 @@ export type AgentState = typeof AgentStateSchema.State;
 export type TraceSpan = z.infer<typeof traceSpanSchema>;
 export type TraceOutcome = z.infer<typeof traceOutcomeSchema>;
 export type AgentTrace = z.infer<typeof agentTraceSchema>;
+export type FinalAction = z.infer<typeof finalActionSchema>;
+export type TraceSummary = z.infer<typeof traceSummarySchema>;

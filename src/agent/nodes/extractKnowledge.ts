@@ -88,5 +88,9 @@ export const extractAndStoreKnowledge = async (state: AgentState) => {
   // Prune trace at the end of the workflow to prevent bloat
   trace = TraceUtil.pruneTrace(trace);
 
-  return { trace };
+  // Create trace summary for evaluations
+  const traceSummary = TraceUtil.createTraceSummary(trace);
+
+  // This node is the success path - always ANSWER
+  return { trace, finalAction: 'ANSWER' as const, traceSummary };
 };

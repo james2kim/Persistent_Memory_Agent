@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import type { AgentTrace, TraceSpan, TraceOutcome } from '../schemas/types';
+import type { AgentTrace, TraceSpan, TraceOutcome, TraceSummary } from '../schemas/types';
 
 /**
  * Trace pruning limits to prevent memory bloat.
@@ -242,5 +242,28 @@ export const TraceUtil = {
 
     // Prune each trace
     return recent.map((t) => this.pruneTrace(t));
+  },
+
+  /**
+   * Creates a lightweight trace summary for evaluations.
+   * Includes key metrics without full span details.
+   */
+  createTraceSummary(trace: AgentTrace): TraceSummary {
+    const gateSpan = trace.spans.find((s) => s.node === 'retrievalGate');
+    const retrievalSpan = trace.spans.find((s) => s.node === 'retrieveMemoriesAndChunks');
+
+    const didRetrieval = retrievalSpan !== undefined;
+    const documentsRetrieved = (retrievalSpan?.meta?.chunksRetrieved as number) ?? 0;
+    const memoriesRetrieved = (retrievalSpan?.meta?.memoriesRetrieved as number) ?? 0;
+
+    return {
+      traceId: trace.traceId,
+      queryType: gateSpan?.meta?.queryType as string | undefined,
+      outcome: trace.outcome?.status,
+      durationMs: trace.outcome?.durationMs,
+      documentsRetrieved,
+      memoriesRetrieved,
+      didRetrieval,
+    };
   },
 };

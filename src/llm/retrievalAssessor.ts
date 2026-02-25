@@ -13,11 +13,13 @@ const SYSTEM_MESSAGE = `You are a query assessor for a study assistant. Analyze 
 ## Field Definitions
 
 ### queryType (enum)
-- **personal**: About the user (goals, preferences, job, past decisions)
-- **study_content**: About uploaded documents, notes, papers, educational material
-- **general_knowledge**: Common facts the assistant already knows
-- **conversational**: Greetings, small talk, meta-questions
-- **off_topic**: Outside study assistant domain (stock tips, medical advice, legal advice, relationship advice)
+Classify based on what the query is ABOUT. Use off_topic as the DEFAULT if the query doesn't clearly fit the other categories.
+
+- **study_content**: Questions about academic subjects, research, uploaded documents, notes, or papers. The user is trying to LEARN something.
+- **personal**: About the user's STUDY-RELATED context: their learning goals, study preferences, progress, or decisions about their education.
+- **general_knowledge**: Factual questions about academic topics (science, history, math, geography, etc.) that don't require the user's documents.
+- **conversational**: Greetings ("hi", "thanks"), meta-questions about the assistant ("what can you do?"), or simple acknowledgments.
+- **off_topic**: ANYTHING that doesn't fit the above categories. This includes ALL personal life advice, lifestyle questions, recommendations, opinions, or decisions unrelated to academics. When in doubt, classify as off_topic.
 
 ### ambiguity (low | moderate | high)
 - **low**: Clear, specific intent (e.g., "What is my main goal?")
@@ -66,10 +68,40 @@ Query: "What is the capital of France?"
 → referencesPersonalContext: false, referencesUploadedContent: false
 → reasoning: "General fact, no retrieval needed"
 
+Query: "Is finasteride better than dutasteride?"
+→ queryType: study_content, ambiguity: low, riskWithoutRetrieval: moderate
+→ referencesPersonalContext: false, referencesUploadedContent: true
+→ reasoning: "Comparing medications academically - likely has research/notes on this"
+
+Query: "Explain the legal precedent in Brown v. Board of Education"
+→ queryType: study_content, ambiguity: low, riskWithoutRetrieval: moderate
+→ referencesPersonalContext: false, referencesUploadedContent: true
+→ reasoning: "Academic legal/history question"
+
 Query: "What stocks should I buy?"
 → queryType: off_topic, ambiguity: low, riskWithoutRetrieval: low
 → referencesPersonalContext: false, referencesUploadedContent: false
-→ reasoning: "Financial advice is outside study assistant domain"`;
+→ reasoning: "Personal life advice, not academic"
+
+Query: "Should I take a nap?"
+→ queryType: off_topic, ambiguity: low, riskWithoutRetrieval: low
+→ referencesPersonalContext: false, referencesUploadedContent: false
+→ reasoning: "Personal life decision, not academic"
+
+Query: "What should I wear today?"
+→ queryType: off_topic, ambiguity: low, riskWithoutRetrieval: low
+→ referencesPersonalContext: false, referencesUploadedContent: false
+→ reasoning: "Personal lifestyle question, not academic"
+
+Query: "Should I go to the gym or stay home?"
+→ queryType: off_topic, ambiguity: low, riskWithoutRetrieval: low
+→ referencesPersonalContext: false, referencesUploadedContent: false
+→ reasoning: "Personal life decision, not academic"
+
+Query: "What do you think about the weather?"
+→ queryType: off_topic, ambiguity: low, riskWithoutRetrieval: low
+→ referencesPersonalContext: false, referencesUploadedContent: false
+→ reasoning: "Casual question, not academic"`;
 
 const modelWithAssessmentSchema = haikuModel.withStructuredOutput(retrievalGateAssessmentSchema);
 
@@ -92,13 +124,23 @@ export const retrievalGateAssessor = async (query: string): Promise<RetrievalGat
  * conversational queries (greetings, small talk).
  */
 export const retrievalGatePolicy = (assessment: RetrievalGateAssessment): RetrievalGateDecision => {
-  // Skip retrieval for conversational and off-topic queries
-  if (assessment.queryType === 'conversational' || assessment.queryType === 'off_topic') {
+  // Off-topic queries: redirect politely via clarification response
+  if (assessment.queryType === 'off_topic') {
+    return {
+      shouldRetrieveDocuments: false,
+      shouldRetrieveMemories: false,
+      needsClarification: true,
+      reasoning: 'off_topic query, politely redirect',
+    };
+  }
+
+  // Conversational queries: answer directly without retrieval
+  if (assessment.queryType === 'conversational') {
     return {
       shouldRetrieveDocuments: false,
       shouldRetrieveMemories: false,
       needsClarification: false,
-      reasoning: `${assessment.queryType} query, no retrieval needed`,
+      reasoning: 'conversational query, no retrieval needed',
     };
   }
 

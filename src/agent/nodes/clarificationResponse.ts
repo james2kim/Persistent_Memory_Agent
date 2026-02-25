@@ -1,4 +1,4 @@
-import type { AgentState } from '../../schemas/types';
+import type { AgentState, FinalAction } from '../../schemas/types';
 import { haikuModel } from '../constants';
 import { TraceUtil } from '../../util/TraceUtil';
 
@@ -42,9 +42,19 @@ export const clarificationResponse = async (state: AgentState) => {
   // Prune trace at the end of the workflow to prevent bloat
   trace = TraceUtil.pruneTrace(trace);
 
+  // Determine final action: REFUSE for off-topic, CLARIFY for ambiguous
+  const gateSpan = trace.spans.find((s) => s.node === 'retrievalGate');
+  const queryType = gateSpan?.meta?.queryType as string | undefined;
+  const finalAction: FinalAction = queryType === 'off_topic' ? 'REFUSE' : 'CLARIFY';
+
+  // Create trace summary for evaluations
+  const traceSummary = TraceUtil.createTraceSummary(trace);
+
   return {
     messages: [aiMessage],
     response,
     trace,
+    finalAction,
+    traceSummary,
   };
 };

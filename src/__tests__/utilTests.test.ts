@@ -537,4 +537,64 @@ describe('TraceUtil', () => {
       expect(pruned).toEqual([]);
     });
   });
+
+  describe('createTraceSummary', () => {
+    it('should create summary with basic fields', () => {
+      let trace = TraceUtil.createTrace('test query');
+      trace = TraceUtil.setOutcome(trace, { status: 'success' });
+
+      const summary = TraceUtil.createTraceSummary(trace);
+
+      expect(summary.traceId).toBe(trace.traceId);
+      expect(summary.outcome).toBe('success');
+      expect(summary.durationMs).toBeDefined();
+      expect(summary.didRetrieval).toBe(false);
+    });
+
+    it('should extract queryType from retrievalGate span', () => {
+      let trace = TraceUtil.createTrace('test');
+      trace = TraceUtil.addSpan(trace, 'retrievalGate', mockNow, {
+        queryType: 'study_content',
+      });
+
+      const summary = TraceUtil.createTraceSummary(trace);
+
+      expect(summary.queryType).toBe('study_content');
+    });
+
+    it('should extract retrieval metrics from retrieveMemoriesAndChunks span', () => {
+      let trace = TraceUtil.createTrace('test');
+      trace = TraceUtil.addSpan(trace, 'retrieveMemoriesAndChunks', mockNow, {
+        chunksRetrieved: 5,
+        memoriesRetrieved: 3,
+      });
+
+      const summary = TraceUtil.createTraceSummary(trace);
+
+      expect(summary.didRetrieval).toBe(true);
+      expect(summary.documentsRetrieved).toBe(5);
+      expect(summary.memoriesRetrieved).toBe(3);
+    });
+
+    it('should handle trace without retrieval span', () => {
+      let trace = TraceUtil.createTrace('test');
+      trace = TraceUtil.addSpan(trace, 'retrievalGate', mockNow, {
+        queryType: 'conversational',
+      });
+
+      const summary = TraceUtil.createTraceSummary(trace);
+
+      expect(summary.didRetrieval).toBe(false);
+      expect(summary.documentsRetrieved).toBe(0);
+      expect(summary.memoriesRetrieved).toBe(0);
+    });
+
+    it('should handle trace without outcome', () => {
+      const trace = TraceUtil.createTrace('test');
+      const summary = TraceUtil.createTraceSummary(trace);
+
+      expect(summary.outcome).toBeUndefined();
+      expect(summary.durationMs).toBeUndefined();
+    });
+  });
 });
