@@ -3,7 +3,7 @@ dotenv.config({ path: '.env.local' });
 import type { BaseMessage } from '@langchain/core/messages';
 import type { Message } from '../schemas/types';
 import { z } from 'zod/v4';
-import { sonnetModel } from '../agent/constants';
+import { haikuModel } from '../agent/constants';
 
 const MAX_SUMMARY_CHARS = 2500;
 const COMPRESSION_THRESHOLD = 2400; // Start compressing before hitting hard limit
@@ -36,7 +36,7 @@ Rules:
 
 Output your confidence (0-1) based on how much essential information was present in the combined summary.`;
 
-const modelWithRelaxedSchema = sonnetModel.withStructuredOutput(relaxedSummarizationSchema);
+const modelWithRelaxedSchema = haikuModel.withStructuredOutput(relaxedSummarizationSchema);
 
 const COMPRESS_SUMMARY_PROMPT = `You are a summary compressor. Your task is to condense the given summary while preserving ALL critical information.
 
@@ -59,7 +59,7 @@ async function compressSummary(content: string, maxAttempts = 1): Promise<string
 
   while (current.length > COMPRESSION_THRESHOLD && attempts < maxAttempts) {
     attempts++;
-    const response = await sonnetModel.invoke([
+    const response = await haikuModel.invoke([
       {
         role: 'system',
         content: COMPRESS_SUMMARY_PROMPT.replace('{{LENGTH}}', String(current.length)),
@@ -139,9 +139,7 @@ export const summarizeSessionMessages = async (
   existingSummary: string,
   messages: Message[]
 ): Promise<{ confidence: number; content: string }> => {
-  const formattedMessages = messages
-    .map((m) => `[${m.role}]: ${m.content}`)
-    .join('\n');
+  const formattedMessages = messages.map((m) => `[${m.role}]: ${m.content}`).join('\n');
 
   const existingSummarySection = existingSummary
     ? `\n\nEXISTING SUMMARY TO MERGE:\n${existingSummary}`

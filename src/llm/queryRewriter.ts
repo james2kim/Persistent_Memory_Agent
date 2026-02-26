@@ -5,15 +5,17 @@ const rewriteSchema = z.object({
   rewrittenQuery: z.string().describe('The query with references resolved, or original if no rewrite needed'),
 });
 
-const REWRITE_SYSTEM_PROMPT = `Resolve pronouns (it, this, that) in the query using ONLY the conversation context provided.
+const REWRITE_SYSTEM_PROMPT = `Resolve references in the query using the conversation context.
 
-IMPORTANT:
-- Use the ACTUAL topic from the context, not examples
-- If context mentions topic X, replace "this/it/that" with X
-- If unsure or no clear topic in context, return the query UNCHANGED
-- Never invent or guess topics
+Handle:
+- Pronouns: "it", "this", "that" → replace with the ACTUAL topic from context
+- Implicit references: "clarify", "explain", "why" → add the ACTUAL topic from context
 
-Output only the rewritten query string, nothing else.`;
+Rules:
+- Extract the topic from the provided context ONLY
+- NEVER use topics from this prompt or examples
+- If no clear topic in context, return query UNCHANGED
+- Output the rewritten query, nothing else`;
 
 const modelWithSchema = haikuModel.withStructuredOutput(rewriteSchema);
 
@@ -30,9 +32,21 @@ export async function rewriteQuery(
     return { rewrittenQuery: query, wasRewritten: false };
   }
 
-  // Quick heuristic: skip if query is already specific (no common pronouns/references)
+  // Quick heuristic: skip if query is already specific
+  // Only rewrite SHORT queries with pronouns/references (longer queries are usually self-contained)
+  const isShortQuery = query.split(/\s+/).length <= 6;
   const referencePatterns = /\b(it|this|that|these|those|the same|more|again)\b/i;
-  if (!referencePatterns.test(query)) {
+  const implicitPatterns = /^(clarify|elaborate|explain|expand|why\??|how come|what do you mean)$/i;
+
+  const hasReference = referencePatterns.test(query);
+  const isImplicitOnly = implicitPatterns.test(query.trim());
+
+  if (!hasReference && !isImplicitOnly) {
+    return { rewrittenQuery: query, wasRewritten: false };
+  }
+
+  // Skip rewriting longer queries that happen to contain pronouns - they're usually self-contained
+  if (!isShortQuery && !isImplicitOnly) {
     return { rewrittenQuery: query, wasRewritten: false };
   }
 

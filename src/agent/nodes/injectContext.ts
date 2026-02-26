@@ -1,8 +1,12 @@
 import type { AgentState } from '../../schemas/types';
-import { sonnetModel, CONTEXT_WINDOW_MESSAGES } from '../constants';
+import { sonnetModel, haikuModel, CONTEXT_WINDOW_MESSAGES } from '../constants';
 import { SYSTEM_MESSAGE, buildContextBlock } from '../../llm/promptBuilder';
 import { TraceUtil } from '../../util/TraceUtil';
 import { SystemMessage, HumanMessage } from '@langchain/core/messages';
+
+// Route to Haiku if retrieval is relevant
+const MIN_CHUNKS_FOR_HAIKU = 2;
+const MAX_DISTANCE_FOR_HAIKU = 0.6;
 
 export const injectContext = async (state: AgentState) => {
   const span = TraceUtil.startSpan('injectContext');
@@ -11,18 +15,30 @@ export const injectContext = async (state: AgentState) => {
   const documents = state.retrievedContext?.documents ?? [];
   const memories = state.retrievedContext?.memories ?? [];
 
+  // Route decision:
+  // - No context needed (conversational) → Haiku (fast)
+  // - Good retrieval (low distance) → Haiku (synthesis)
+  // - Weak retrieval → Sonnet (better at "I don't know")
+  const topDistance = documents[0]?.distance ?? 1;
+
+  const hasGoodRetrieval = documents.length >= MIN_CHUNKS_FOR_HAIKU && topDistance <= MAX_DISTANCE_FOR_HAIKU;
+  const noContextNeeded = documents.length === 0 && memories.length === 0;
+
+  const useHaiku = hasGoodRetrieval || noContextNeeded;
+  const model = useHaiku ? haikuModel : sonnetModel;
+  const modelName = useHaiku ? 'haiku' : 'sonnet';
+
+  console.log(
+    `[injectContext] Using ${modelName} (dist=${topDistance.toFixed(3)}, chunks=${documents.length})`
+  );
+
   const contextBlock = buildContextBlock(documents, memories);
   const contextTokens = contextBlock ? Math.ceil(contextBlock.length / 4) : 0;
 
   const userQuery = state.userQuery;
 
   const userContent = contextBlock
-    ? [
-        `TASK\nAnswer the USER REQUEST using CONTEXT. Cite sources for factual claims.`,
-        `\nUSER REQUEST\n${userQuery}`,
-        `\nCONTEXT\n<<<CONTEXT_START>>>\n${contextBlock}\n<<<CONTEXT_END>>>`,
-        `\nFOCUS\n${userQuery}`,
-      ].join('\n')
+    ? `${userQuery}\n\n${contextBlock}`
     : userQuery;
 
   // Get previous messages (exclude the current user message which is last)
@@ -48,18 +64,16 @@ export const injectContext = async (state: AgentState) => {
     },
   });
 
-  const messagesForLLM = [
-    systemMessage,
-    ...recentMessages,
-    new HumanMessage(userContent),
-  ];
+  const messagesForLLM = [systemMessage, ...recentMessages, new HumanMessage(userContent)];
 
-  const aiMessage = await sonnetModel.invoke(messagesForLLM);
+  const aiMessage = await model.invoke(messagesForLLM);
 
   const response =
     typeof aiMessage.content === 'string' ? aiMessage.content : JSON.stringify(aiMessage.content);
 
   trace = span.end(trace, {
+    model: modelName,
+    topDistance,
     documentsUsed: documents.length,
     memoriesUsed: memories.length,
     contextTokens,

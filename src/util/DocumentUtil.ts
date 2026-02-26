@@ -290,8 +290,8 @@ export const DocumentUtil = {
       created_at: chunk.created_at,
       embedding: chunk.embedding,
       distance: chunk.distance,
-      // Absolute confidence: 1.0 at distance=0, 0.0 at distance=1
-      confidence: Math.max(0, 1 - chunk.distance),
+      // Scaled confidence: distance 0.3→0.85, 0.5→0.75, 0.7→0.65
+      confidence: Math.max(0, 1 - chunk.distance * 0.5),
     }));
 
     // 5. Apply budget constraints (keeps first N = most relevant)
@@ -299,7 +299,8 @@ export const DocumentUtil = {
 
     // Calculate diagnostics
     const topChunkDistance = finalChunks.length > 0 ? finalChunks[0].distance : -1;
-    const bottomChunkDistance = finalChunks.length > 0 ? finalChunks[finalChunks.length - 1].distance : -1;
+    const bottomChunkDistance =
+      finalChunks.length > 0 ? finalChunks[finalChunks.length - 1].distance : -1;
     const uniqueDocIds = new Set(finalChunks.map((c) => c.document_id));
 
     const diagnostics: RetrievalDiagnostics = {
