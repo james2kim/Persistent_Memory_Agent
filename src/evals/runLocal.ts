@@ -8,11 +8,18 @@
  *   npx tsx src/evals/runLocal.ts
  *   npx tsx src/evals/runLocal.ts --category off_topic
  *   npx tsx src/evals/runLocal.ts --verbose
+ *
+ * Prerequisites:
+ *   Run `npx tsx src/evals/seed.ts` first to seed test data.
  */
 
 // Load env BEFORE any other imports (must be synchronous)
 import * as dotenv from 'dotenv';
 dotenv.config({ path: '.env.local' });
+
+// Set eval user ID for consistent test data retrieval
+import { EVAL_USER_ID } from './fixtures/evalDocuments.js';
+process.env.EVAL_USER_ID = EVAL_USER_ID;
 
 // Now import everything else
 import * as crypto from 'crypto';

@@ -9,6 +9,11 @@ interface Config {
 }
 
 export function getUserId(): string {
+  // Allow override for testing/evals
+  if (process.env.EVAL_USER_ID) {
+    return process.env.EVAL_USER_ID;
+  }
+
   if (fs.existsSync(CONFIG_PATH)) {
     const config: Config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
     return config.userId;

@@ -1,4 +1,8 @@
-import { RetrievalGateAssessment, RetrievalGateDecision, retrievalGateAssessmentSchema } from '../schemas/types';
+import {
+  RetrievalGateAssessment,
+  RetrievalGateDecision,
+  retrievalGateAssessmentSchema,
+} from '../schemas/types';
 import { haikuModel } from '../agent/constants';
 
 const SYSTEM_PROMPT = `Classify this query for a study assistant.
@@ -9,7 +13,7 @@ queryType:
 - general_knowledge: simple facts (capitals, math, definitions)
 - conversational: greetings, thanks, meta ("hi", "what can you do?")
 - off_topic: lifestyle/life advice unrelated to studying ("should I nap?", "what to wear")
-- unclear: empty or impossible to classify
+- unclear: vague, ambiguous, or impossible to classify ("I need information")
 
 referencesPersonalContext: true if query mentions "my", "I", or user-specific info
 
@@ -50,17 +54,27 @@ export const retrievalGateAssessor = async (query: string): Promise<RetrievalGat
 export const retrievalGatePolicy = (assessment: RetrievalGateAssessment): RetrievalGateDecision => {
   const { queryType, referencesPersonalContext } = assessment;
 
-  // No retrieval, needs redirect
-  if (queryType === 'off_topic' || queryType === 'unclear') {
+  // Off-topic: no retrieval, redirect (not clarification)
+  if (queryType === 'off_topic') {
+    return {
+      shouldRetrieveDocuments: false,
+      shouldRetrieveMemories: false,
+      needsClarification: false,
+      reasoning: 'off_topic - redirect',
+    };
+  }
+
+  // Unclear: no retrieval, ask clarifying question
+  if (queryType === 'unclear') {
     return {
       shouldRetrieveDocuments: false,
       shouldRetrieveMemories: false,
       needsClarification: true,
-      reasoning: `${queryType} - redirect`,
+      reasoning: 'unclear - clarify',
     };
   }
 
-  // No retrieval needed
+  // Conversational: no retrieval
   if (queryType === 'conversational') {
     return {
       shouldRetrieveDocuments: false,
@@ -70,11 +84,32 @@ export const retrievalGatePolicy = (assessment: RetrievalGateAssessment): Retrie
     };
   }
 
-  // Retrieval needed
+  // General knowledge: retrieve documents in case we have relevant info
+  if (queryType === 'general_knowledge') {
+    return {
+      shouldRetrieveDocuments: true,
+      shouldRetrieveMemories: false,
+      needsClarification: false,
+      reasoning: 'general_knowledge - retrieve documents',
+    };
+  }
+
+  // Personal: retrieve both documents and memories
+  if (queryType === 'personal') {
+    return {
+      shouldRetrieveDocuments: true,
+      shouldRetrieveMemories: true,
+      needsClarification: false,
+      reasoning: 'personal - retrieve documents and memories',
+    };
+  }
+
+  // Study content: retrieve documents; retrieve memories only if explicitly personal
+  // (referencesPersonalContext means "needs user history", so use it)
   return {
     shouldRetrieveDocuments: true,
-    shouldRetrieveMemories: referencesPersonalContext || queryType === 'personal',
+    shouldRetrieveMemories: referencesPersonalContext,
     needsClarification: false,
-    reasoning: `${queryType} - retrieve`,
+    reasoning: 'study_content - retrieve documents',
   };
 };
