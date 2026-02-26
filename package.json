@@ -20,6 +20,9 @@
     "test:integration": "vitest run src/__tests__/integration.test.ts",
     "test:seed": "tsx src/__tests__/seed.ts",
     "test:seed:memories": "tsx src/__tests__/seedMemories.ts",
+    "eval": "tsx src/evals/runLocal.ts",
+    "eval:verbose": "tsx src/evals/runLocal.ts --verbose",
+    "eval:langsmith": "tsx src/evals/runExperiment.ts",
     "migrate": "knex --knexfile knexfile.ts migrate:latest",
     "migrate:rollback": "knex --knexfile knexfile.ts migrate:rollback"
   },
@@ -38,6 +41,7 @@
     "express": "^5.2.1",
     "knex": "^3.1.0",
     "langchain": "^1.2.12",
+    "langsmith": "^0.5.7",
     "mammoth": "^1.11.0",
     "multer": "^2.0.2",
     "pdf-parse": "^1.1.4",

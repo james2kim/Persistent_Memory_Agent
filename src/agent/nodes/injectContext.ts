@@ -21,7 +21,8 @@ export const injectContext = async (state: AgentState) => {
   // - Weak retrieval → Sonnet (better at "I don't know")
   const topDistance = documents[0]?.distance ?? 1;
 
-  const hasGoodRetrieval = documents.length >= MIN_CHUNKS_FOR_HAIKU && topDistance <= MAX_DISTANCE_FOR_HAIKU;
+  const hasGoodRetrieval =
+    documents.length >= MIN_CHUNKS_FOR_HAIKU && topDistance <= MAX_DISTANCE_FOR_HAIKU;
   const noContextNeeded = documents.length === 0 && memories.length === 0;
 
   const useHaiku = hasGoodRetrieval || noContextNeeded;
@@ -37,9 +38,7 @@ export const injectContext = async (state: AgentState) => {
 
   const userQuery = state.userQuery;
 
-  const userContent = contextBlock
-    ? `${userQuery}\n\n${contextBlock}`
-    : userQuery;
+  const userContent = contextBlock ? `${userQuery}\n\n${contextBlock}` : userQuery;
 
   // Get previous messages (exclude the current user message which is last)
   const allPreviousMessages = state.messages.slice(0, -1);

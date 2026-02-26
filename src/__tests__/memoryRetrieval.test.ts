@@ -1,7 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { MemoryUtil } from '../util/MemoryUtil';
-import { MemoryStore } from '../stores/MemoryStore';
-import { defaultEmbedding } from '../services/EmbeddingService';
 import { db } from '../db/knex';
 import { TEST_MEMORIES, TEST_MEMORY_QUERIES, TEST_USER_ID } from './fixtures/testMemories';
 import type { Memory } from '../schemas/types';
@@ -98,9 +96,7 @@ describe('Memory Retrieval Quality Evaluation', () => {
 
   describe('Aggregate Metrics', () => {
     it(`MRR should be >= ${MRR_THRESHOLD}`, async () => {
-      const queriesWithRelevant = TEST_MEMORY_QUERIES.filter(
-        (q) => q.relevantMemoryIds.length > 0
-      );
+      const queriesWithRelevant = TEST_MEMORY_QUERIES.filter((q) => q.relevantMemoryIds.length > 0);
       const results = await Promise.all(queriesWithRelevant.map(evaluateQuery));
       const mrr = results.reduce((sum, r) => sum + r.rr, 0) / results.length;
 
@@ -109,13 +105,13 @@ describe('Memory Retrieval Quality Evaluation', () => {
     });
 
     it(`Recall@${RECALL_K} should be >= ${RECALL_THRESHOLD}`, async () => {
-      const queriesWithRelevant = TEST_MEMORY_QUERIES.filter(
-        (q) => q.relevantMemoryIds.length > 0
-      );
+      const queriesWithRelevant = TEST_MEMORY_QUERIES.filter((q) => q.relevantMemoryIds.length > 0);
       const results = await Promise.all(queriesWithRelevant.map(evaluateQuery));
       const meanRecall = results.reduce((sum, r) => sum + r.recallAtK, 0) / results.length;
 
-      console.log(`Memory Recall@${RECALL_K}: ${meanRecall.toFixed(3)} (threshold: ${RECALL_THRESHOLD})`);
+      console.log(
+        `Memory Recall@${RECALL_K}: ${meanRecall.toFixed(3)} (threshold: ${RECALL_THRESHOLD})`
+      );
       expect(meanRecall).toBeGreaterThanOrEqual(RECALL_THRESHOLD);
     });
   });
@@ -152,11 +148,10 @@ describe('Memory Retrieval Quality Evaluation', () => {
     });
 
     it('should filter by multiple allowed types', async () => {
-      const result = await MemoryUtil.retrieveRelevantMemories(
-        TEST_USER_ID,
-        'What do I know?',
-        { maxResults: 10, allowedTypes: ['fact', 'preference'] }
-      );
+      const result = await MemoryUtil.retrieveRelevantMemories(TEST_USER_ID, 'What do I know?', {
+        maxResults: 10,
+        allowedTypes: ['fact', 'preference'],
+      });
 
       expect(result.success).toBe(true);
       if (result.success) {
@@ -169,11 +164,9 @@ describe('Memory Retrieval Quality Evaluation', () => {
 
   describe('Relevance Filtering', () => {
     it('should filter out low confidence memories', async () => {
-      const result = await MemoryUtil.retrieveRelevantMemories(
-        TEST_USER_ID,
-        'quantum computing',
-        { maxResults: 10 }
-      );
+      const result = await MemoryUtil.retrieveRelevantMemories(TEST_USER_ID, 'quantum computing', {
+        maxResults: 10,
+      });
 
       expect(result.success).toBe(true);
       if (result.success) {
@@ -216,11 +209,10 @@ describe('Memory Retrieval Quality Evaluation', () => {
     });
 
     it('should respect maxTokens limit', async () => {
-      const result = await MemoryUtil.retrieveRelevantMemories(
-        TEST_USER_ID,
-        'Tell me everything',
-        { maxResults: 10, maxTokens: 200 }
-      );
+      const result = await MemoryUtil.retrieveRelevantMemories(TEST_USER_ID, 'Tell me everything', {
+        maxResults: 10,
+        maxTokens: 200,
+      });
 
       expect(result.success).toBe(true);
       if (result.success) {

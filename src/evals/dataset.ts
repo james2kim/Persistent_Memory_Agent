@@ -1,0 +1,188 @@
+/**
+ * Smoke Test Dataset for LangSmith Experiments
+ *
+ * Categories:
+ * - study_content: Questions about documents/study materials → ANSWER
+ * - personal: Questions about user's personal info/memories → ANSWER
+ * - temporal_containment: Time-bound questions → ANSWER
+ * - off_topic: Lifestyle/opinion questions → REFUSE
+ * - unclear: Ambiguous queries → CLARIFY
+ *
+ * Expected behaviors:
+ * - ANSWER: Should provide a substantive answer
+ * - REFUSE: Should politely decline/redirect
+ * - CLARIFY: Should ask for clarification
+ */
+
+export type ExpectedBehavior = 'ANSWER' | 'REFUSE' | 'CLARIFY';
+
+export type Category =
+  | 'study_content'
+  | 'personal'
+  | 'temporal_containment'
+  | 'off_topic'
+  | 'unclear'
+  | 'general_knowledge'
+  | 'conversational';
+
+export interface SmokeTestCase {
+  userQuery: string;
+  category: Category;
+  expected_behavior: ExpectedBehavior;
+  // Assertion fields
+  answer_includes?: string[];
+  answer_must_contain_any?: string[];
+  answer_should_contain?: string[];
+  must_cover?: string[];
+  expected_amount_usd?: number;
+  dataset_split?: string[];
+}
+
+export const SMOKE_TEST_DATASET: SmokeTestCase[] = [
+  // === TEMPORAL CONTAINMENT ===
+  {
+    userQuery: 'What did I do in 2023?',
+    category: 'temporal_containment',
+    expected_behavior: 'ANSWER',
+    answer_must_contain_any: ['Axiom', '2022', 'present'],
+    dataset_split: ['base'],
+  },
+
+  // === OFF-TOPIC (Should REFUSE) ===
+  {
+    userQuery: 'Can I get some advice on what stocks to invest in?',
+    category: 'off_topic',
+    expected_behavior: 'REFUSE',
+    dataset_split: ['base'],
+  },
+  {
+    userQuery: 'Should I wear blue or black jeans?',
+    category: 'off_topic',
+    expected_behavior: 'REFUSE',
+    dataset_split: ['base'],
+  },
+  {
+    userQuery: 'Do you think I should take dutasteride over finasteride?',
+    category: 'off_topic',
+    expected_behavior: 'REFUSE',
+    dataset_split: ['base'],
+  },
+  {
+    userQuery: 'Is pineapple good on pizza?',
+    category: 'off_topic',
+    expected_behavior: 'REFUSE',
+    dataset_split: ['base'],
+  },
+
+  // === UNCLEAR (Should CLARIFY) ===
+  {
+    userQuery: 'What was that again?',
+    category: 'unclear',
+    expected_behavior: 'CLARIFY',
+    dataset_split: ['base'],
+  },
+  {
+    userQuery: 'I need information',
+    category: 'unclear',
+    expected_behavior: 'CLARIFY',
+    dataset_split: ['base'],
+  },
+  {
+    userQuery: 'Can you help me with this?',
+    category: 'unclear',
+    expected_behavior: 'CLARIFY',
+    dataset_split: ['base'],
+  },
+
+  // === STUDY CONTENT (Should ANSWER) ===
+  {
+    userQuery: 'is finasteride > dutasteride?',
+    category: 'study_content',
+    expected_behavior: 'ANSWER',
+    // Should indicate dutasteride is more effective
+    answer_must_contain_any: ['dutasteride', 'more effective', 'outperform', 'superior'],
+    dataset_split: ['base'],
+  },
+  {
+    userQuery: 'Why is context in the middle bad?',
+    category: 'study_content',
+    expected_behavior: 'ANSWER',
+    must_cover: [
+      'model attention/recency bias or position effects',
+      'instructions should be near the end or clearly separated from evidence',
+      'context can be treated as instruction or vice versa if mixed',
+      'recommended structure: instructions then context (or context then instructions) with clear delimiters',
+    ],
+    dataset_split: ['base'],
+  },
+  {
+    userQuery: 'What is ReAct?',
+    category: 'study_content',
+    expected_behavior: 'ANSWER',
+    answer_must_contain_any: ['reasoning', 'acting', 'tool', 'observation'],
+    dataset_split: ['base'],
+  },
+  {
+    userQuery: 'What is React?',
+    category: 'study_content',
+    expected_behavior: 'ANSWER',
+    must_cover: [
+      'JavaScript library',
+      'user interfaces',
+      'component-based',
+      'developed by Facebook or Meta',
+    ],
+    dataset_split: ['base'],
+  },
+
+  // === PERSONAL (Should ANSWER with user-specific info) ===
+  {
+    userQuery: 'How much was my severance again?',
+    category: 'personal',
+    expected_behavior: 'ANSWER',
+    expected_amount_usd: 35880,
+    dataset_split: ['base'],
+  },
+  {
+    userQuery: 'What is my career goal?',
+    category: 'personal',
+    expected_behavior: 'ANSWER',
+    answer_includes: ['agentic', 'ai', 'engineer'],
+    dataset_split: ['base'],
+  },
+  {
+    userQuery: 'What is my preferred programming language?',
+    category: 'personal',
+    expected_behavior: 'ANSWER',
+    answer_should_contain: ['Typescript'],
+    dataset_split: ['base'],
+  },
+  {
+    userQuery: 'Where did I work in 2021?',
+    category: 'personal',
+    expected_behavior: 'ANSWER',
+    answer_should_contain: ['Fresh', 'Consulting'],
+    dataset_split: ['base'],
+  },
+];
+
+/**
+ * Get test cases by split (e.g., 'base', 'extended')
+ */
+export const getTestCasesBySplit = (split: string): SmokeTestCase[] => {
+  return SMOKE_TEST_DATASET.filter((tc) => tc.dataset_split?.includes(split));
+};
+
+/**
+ * Get test cases by category
+ */
+export const getTestCasesByCategory = (category: Category): SmokeTestCase[] => {
+  return SMOKE_TEST_DATASET.filter((tc) => tc.category === category);
+};
+
+/**
+ * Get test cases by expected behavior
+ */
+export const getTestCasesByBehavior = (behavior: ExpectedBehavior): SmokeTestCase[] => {
+  return SMOKE_TEST_DATASET.filter((tc) => tc.expected_behavior === behavior);
+};
