@@ -1,8 +1,13 @@
 import { ChatAnthropic } from '@langchain/anthropic';
 
 export const MAX_TOOL_ATTEMPTS = 3;
-export const MAX_MESSAGES = 40; // Summarize + prune when reached
-export const CONTEXT_WINDOW_MESSAGES = 20; // Messages to send to LLM (+ summary)
+
+// Summarization thresholds
+// At MAX_MESSAGES, summarize oldest MESSAGES_TO_SUMMARIZE and keep the rest
+// Result: messages oscillate between MESSAGES_TO_KEEP and MAX_MESSAGES
+export const MAX_MESSAGES = 15; // Trigger summarization when reached
+export const MESSAGES_TO_SUMMARIZE = 10; // Oldest N messages to summarize
+export const MESSAGES_TO_KEEP = 5; // Newest N messages to retain (MAX_MESSAGES - MESSAGES_TO_SUMMARIZE)
 
 export const haikuModel = new ChatAnthropic({
   model: 'claude-3-haiku-20240307',

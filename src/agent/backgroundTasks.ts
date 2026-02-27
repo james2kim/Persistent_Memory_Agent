@@ -1,15 +1,15 @@
 import { RedisSessionStore } from '../stores/RedisSessionStore';
 import { summarize } from '../llm/summarizeMessages';
-import { MAX_MESSAGES } from './constants';
+import { MESSAGES_TO_SUMMARIZE, MESSAGES_TO_KEEP } from './constants';
 import type { BaseMessage } from '@langchain/core/messages';
 
 /**
  * Runs summarization in the background without blocking the response.
- * Called when message count reaches MAX_MESSAGES (40).
+ * Called when message count reaches MAX_MESSAGES (15).
  *
  * Strategy:
- * - Summarize oldest 20 messages (merge with existing summary)
- * - Prune to keep newest 20 messages
+ * - Summarize oldest 10 messages (merge with existing summary)
+ * - Prune to keep newest 5 messages
  */
 export async function runBackgroundSummarization(
   sessionId: string,
@@ -23,10 +23,9 @@ export async function runBackgroundSummarization(
       `[backgroundSummarization] Messages: ${messages.length}, Summary length: ${currentSummary.length}`
     );
 
-    // Split: oldest half to summarize, newest half to keep
-    const halfPoint = Math.floor(MAX_MESSAGES / 2);
-    const messagesToSummarize = messages.slice(0, halfPoint);
-    const messagesToKeep = messages.slice(-halfPoint);
+    // Split: oldest N to summarize, newest M to keep
+    const messagesToSummarize = messages.slice(0, MESSAGES_TO_SUMMARIZE);
+    const messagesToKeep = messages.slice(-MESSAGES_TO_KEEP);
 
     console.log(
       `[backgroundSummarization] Summarizing oldest ${messagesToSummarize.length} messages, keeping newest ${messagesToKeep.length}`

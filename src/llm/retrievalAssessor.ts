@@ -59,6 +59,7 @@ export const retrievalGatePolicy = (assessment: RetrievalGateAssessment): Retrie
     return {
       shouldRetrieveDocuments: false,
       shouldRetrieveMemories: false,
+      memoryBudget: 'minimal',
       needsClarification: false,
       reasoning: 'off_topic - redirect',
     };
@@ -69,6 +70,7 @@ export const retrievalGatePolicy = (assessment: RetrievalGateAssessment): Retrie
     return {
       shouldRetrieveDocuments: false,
       shouldRetrieveMemories: false,
+      memoryBudget: 'minimal',
       needsClarification: true,
       reasoning: 'unclear - clarify',
     };
@@ -79,6 +81,7 @@ export const retrievalGatePolicy = (assessment: RetrievalGateAssessment): Retrie
     return {
       shouldRetrieveDocuments: false,
       shouldRetrieveMemories: false,
+      memoryBudget: 'minimal',
       needsClarification: false,
       reasoning: 'conversational - no retrieval',
     };
@@ -89,27 +92,30 @@ export const retrievalGatePolicy = (assessment: RetrievalGateAssessment): Retrie
     return {
       shouldRetrieveDocuments: true,
       shouldRetrieveMemories: false,
+      memoryBudget: 'minimal',
       needsClarification: false,
       reasoning: 'general_knowledge - retrieve documents',
     };
   }
 
-  // Personal: retrieve both documents and memories
+  // Personal: retrieve both documents and memories with full budget
   if (queryType === 'personal') {
     return {
       shouldRetrieveDocuments: true,
       shouldRetrieveMemories: true,
+      memoryBudget: 'full',
       needsClarification: false,
       reasoning: 'personal - retrieve documents and memories',
     };
   }
 
-  // Study content: retrieve documents; retrieve memories only if explicitly personal
-  // (referencesPersonalContext means "needs user history", so use it)
+  // Study content: retrieve both documents and memories
+  // Use full budget if explicitly personal, minimal otherwise
   return {
     shouldRetrieveDocuments: true,
-    shouldRetrieveMemories: referencesPersonalContext,
+    shouldRetrieveMemories: true,
+    memoryBudget: referencesPersonalContext ? 'full' : 'minimal',
     needsClarification: false,
-    reasoning: 'study_content - retrieve documents',
+    reasoning: `study_content - retrieve docs + memories (${referencesPersonalContext ? 'full' : 'minimal'} budget)`,
   };
 };

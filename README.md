@@ -383,7 +383,7 @@ psql -d study_agent -c "SELECT chunk_index, start_year, end_year, substring(cont
 
 | Constant | Location | Default | Description |
 |----------|----------|---------|-------------|
-| `MAX_MESSAGES` | `constants.ts` | 40 | Triggers summarization |
+| `MAX_MESSAGES` | `constants.ts` | 15 | Triggers summarization (oldest 10 summarized, newest 5 kept) |
 | `STALE_HOURS` | `RedisSessionStore.ts` | 12 | Hours before session summary archival |
 | `TTL` | `RedisSessionStore.ts` | 86400 | Session expiration (24 hours) |
 | `SIMILARITY_THRESHOLD` | `extractKnowledge.ts` | 0.9 | Memory deduplication threshold |

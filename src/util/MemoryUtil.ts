@@ -22,7 +22,7 @@ const MAX_AGE_BY_TYPE = {
 };
 
 export const MemoryUtil = {
-  shouldSummarize(messages: Message[], maxMessages = 40) {
+  shouldSummarize(messages: Message[], maxMessages = 15) {
     return messages.length >= maxMessages;
   },
   estimateTokens(text: string) {

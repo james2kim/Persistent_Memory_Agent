@@ -153,6 +153,10 @@ export const retrievalGateAssessmentSchema = z.object({
 export const retrievalGateDecisionSchema = z.object({
   shouldRetrieveDocuments: z.boolean().describe('Whether to search the document corpus'),
   shouldRetrieveMemories: z.boolean().describe('Whether to search long-term memories'),
+  memoryBudget: z
+    .enum(['full', 'minimal'])
+    .default('full')
+    .describe('Memory retrieval budget: full (6 memories) or minimal (2 memories)'),
   needsClarification: z
     .boolean()
     .describe('Whether the query is too ambiguous and needs clarification'),

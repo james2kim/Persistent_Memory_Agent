@@ -34,10 +34,15 @@ export const retrieveMemoriesAndChunks = async (state: AgentState) => {
   let retrievalDiagnostics: RetrievalDiagnostics | null = null;
 
   if (decision?.shouldRetrieveMemories) {
+    // Use different limits based on memory budget
+    const isFullBudget = decision.memoryBudget === 'full';
+    const maxResults = isFullBudget ? 6 : 2;
+    const maxTokens = isFullBudget ? 500 : 200;
+
     retrievalTasks.push(
       MemoryUtil.retrieveRelevantMemories(userId, query, {
-        maxResults: 6,
-        maxTokens: 500,
+        maxResults,
+        maxTokens,
         minConfidence: 0.5,
         queryEmbedding,
       }).then((result) => {

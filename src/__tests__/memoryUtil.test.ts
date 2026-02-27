@@ -22,26 +22,26 @@ function createMockMemory(overrides: Partial<Memory> = {}): Memory {
 describe('MemoryUtil', () => {
   describe('shouldSummarize', () => {
     it('should return true when messages exceed threshold', () => {
-      const messages = Array(50).fill({ role: 'user', content: 'test' });
-      expect(MemoryUtil.shouldSummarize(messages, 40)).toBe(true);
+      const messages = Array(20).fill({ role: 'user', content: 'test' });
+      expect(MemoryUtil.shouldSummarize(messages, 15)).toBe(true);
     });
 
     it('should return true when messages equal threshold', () => {
-      const messages = Array(40).fill({ role: 'user', content: 'test' });
-      expect(MemoryUtil.shouldSummarize(messages, 40)).toBe(true);
+      const messages = Array(15).fill({ role: 'user', content: 'test' });
+      expect(MemoryUtil.shouldSummarize(messages, 15)).toBe(true);
     });
 
     it('should return false when messages below threshold', () => {
-      const messages = Array(30).fill({ role: 'user', content: 'test' });
-      expect(MemoryUtil.shouldSummarize(messages, 40)).toBe(false);
+      const messages = Array(10).fill({ role: 'user', content: 'test' });
+      expect(MemoryUtil.shouldSummarize(messages, 15)).toBe(false);
     });
 
-    it('should use default threshold of 40', () => {
-      const messages39 = Array(39).fill({ role: 'user', content: 'test' });
-      const messages40 = Array(40).fill({ role: 'user', content: 'test' });
+    it('should use default threshold of 15', () => {
+      const messages14 = Array(14).fill({ role: 'user', content: 'test' });
+      const messages15 = Array(15).fill({ role: 'user', content: 'test' });
 
-      expect(MemoryUtil.shouldSummarize(messages39)).toBe(false);
-      expect(MemoryUtil.shouldSummarize(messages40)).toBe(true);
+      expect(MemoryUtil.shouldSummarize(messages14)).toBe(false);
+      expect(MemoryUtil.shouldSummarize(messages15)).toBe(true);
     });
 
     it('should handle empty array', () => {
