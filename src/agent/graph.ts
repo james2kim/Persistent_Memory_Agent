@@ -2,7 +2,6 @@ import { StateGraph, START, END } from '@langchain/langgraph';
 import { AgentStateSchema } from '../schemas/types';
 import { RedisCheckpointer } from '../memory/RedisCheckpointer';
 import {
-  extractAndStoreKnowledge,
   retrievalGate,
   retrieveMemoriesAndChunks,
   injectContext,
@@ -16,13 +15,11 @@ export function buildWorkflow(checkpointer: RedisCheckpointer) {
     .addNode('retrieveMemoriesAndChunks', retrieveMemoriesAndChunks)
     .addNode('injectContext', injectContext)
     .addNode('clarificationResponse', clarificationResponse)
-    .addNode('extractAndStoreKnowledge', extractAndStoreKnowledge)
     .addEdge(START, 'retrievalGate')
     .addConditionalEdges('retrievalGate', retrievalGateConditionalRouter)
     .addEdge('retrieveMemoriesAndChunks', 'injectContext')
-    .addEdge('injectContext', 'extractAndStoreKnowledge')
-    .addEdge('clarificationResponse', END)
-    .addEdge('extractAndStoreKnowledge', END); // Summarization runs in background
+    .addEdge('injectContext', END) // Knowledge extraction runs in background
+    .addEdge('clarificationResponse', END);
 
   return workflow.compile({ checkpointer });
 }

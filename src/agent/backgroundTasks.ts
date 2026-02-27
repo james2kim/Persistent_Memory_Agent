@@ -1,5 +1,11 @@
 import { RedisSessionStore } from '../stores/RedisSessionStore';
 import { summarize } from '../llm/summarizeMessages';
+import { extractKnowledge } from '../llm/extractKnowledge';
+import { MemoryStore } from '../stores/MemoryStore';
+import { DocumentStore } from '../stores/DocumentStore';
+import { defaultEmbedding } from '../services/EmbeddingService';
+import { ingestDocument } from '../ingest/ingestDocument';
+import { db } from '../db/knex';
 import { MESSAGES_TO_SUMMARIZE, MESSAGES_TO_KEEP } from './constants';
 import type { BaseMessage } from '@langchain/core/messages';
 
@@ -66,5 +72,73 @@ export async function runBackgroundSummarization(
     console.log(`[backgroundSummarization] Complete for session ${sessionId}`);
   } catch (err) {
     console.error('[backgroundSummarization] Error:', err);
+  }
+}
+
+const documentStore = new DocumentStore(db, 1024);
+
+/**
+ * Runs knowledge extraction in the background without blocking the response.
+ * Extracts memories or study materials from user queries.
+ */
+export async function runBackgroundExtraction(
+  userQuery: string,
+  userId: string
+): Promise<void> {
+  try {
+    console.log(`[backgroundExtraction] Starting for query: "${userQuery.slice(0, 50)}..."`);
+
+    const extraction = await extractKnowledge(userQuery);
+
+    if (!extraction) {
+      console.log('[backgroundExtraction] No knowledge to extract');
+      return;
+    }
+
+    if (extraction.contentType === 'study_material' && extraction.studyMaterial) {
+      const { title, content, subject } = extraction.studyMaterial;
+
+      await ingestDocument(
+        db,
+        { documents: documentStore },
+        {
+          source: `chat:${Date.now()}`,
+          title,
+          text: content,
+          metadata: {
+            source: 'chat',
+            subject: subject ?? 'general',
+            ingestedAt: new Date().toISOString(),
+          },
+        },
+        userId
+      );
+      console.log(`[backgroundExtraction] Ingested study material: "${title}"`);
+    } else if (extraction.contentType === 'personal_memory' && extraction.memories) {
+      const validMemories = extraction.memories.filter((mem) => mem.worth_keeping);
+      let added = 0;
+
+      for (const mem of validMemories) {
+        const embedding = await defaultEmbedding.embedText(mem.content);
+        const memory = {
+          user_id: userId,
+          type: mem.type,
+          confidence: mem.confidence,
+          content: mem.content,
+          created_at: new Date().toISOString(),
+          embedding,
+        };
+        const result = await MemoryStore.addMemory(memory, embedding);
+        if (result) added++;
+      }
+
+      if (added > 0) {
+        console.log(`[backgroundExtraction] Added ${added} memories`);
+      }
+    }
+
+    console.log('[backgroundExtraction] Complete');
+  } catch (err) {
+    console.error('[backgroundExtraction] Error:', err);
   }
 }

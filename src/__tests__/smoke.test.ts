@@ -77,12 +77,11 @@ describe('Smoke Tests', () => {
       expect(trace!.outcome).toBeDefined();
       expect(trace!.outcome!.status).toBe('success');
 
-      // Expected spans exist
+      // Expected spans exist (extractAndStoreKnowledge now runs in background)
       const spanNodes = trace!.spans.map((s) => s.node);
       expect(spanNodes).toContain('retrievalGate');
       expect(spanNodes).toContain('retrieveMemoriesAndChunks');
       expect(spanNodes).toContain('injectContext');
-      expect(spanNodes).toContain('extractAndStoreKnowledge');
     });
   });
 

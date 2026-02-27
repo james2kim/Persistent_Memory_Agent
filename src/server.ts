@@ -17,7 +17,7 @@ import { buildWorkflow } from './agent/graph';
 import { ingestDocument } from './ingest/ingestDocument';
 import { DocumentStore } from './stores/DocumentStore';
 import { db } from './db/knex';
-import { runBackgroundSummarization } from './agent/backgroundTasks';
+import { runBackgroundSummarization, runBackgroundExtraction } from './agent/backgroundTasks';
 import { MAX_MESSAGES } from './agent/constants';
 import { LangSmithUtil } from './util/LangSmithUtil';
 import { TitleExtractor } from './util/TitleExtractor';
@@ -204,8 +204,14 @@ app.post('/api/chat', async (req, res) => {
 
     res.json(response);
 
-    // Run background summarization if needed (fire and forget)
+    // Run background tasks (fire and forget)
 
+    // Background knowledge extraction - extracts memories/study materials from user query
+    runBackgroundExtraction(message, userId).catch((err) =>
+      console.error('[/api/chat] Background extraction error:', err)
+    );
+
+    // Background summarization - when message count hits threshold
     if (result?.messages && result.messages.length >= MAX_MESSAGES) {
       console.log(
         `[/api/chat] Triggering background summarization (${result.messages.length} messages)`
