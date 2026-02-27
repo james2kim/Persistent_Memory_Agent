@@ -28,6 +28,28 @@ export class MemoryStoreClass {
     return rows[0].id;
   }
 
+  /**
+   * Fetch profile memories (preferences + facts) by confidence.
+   * No embedding needed - these are always relevant for personalization.
+   */
+  async listProfileMemories({
+    user_id,
+    limit = 5,
+    minConfidence = 0.6,
+  }: {
+    user_id: string;
+    limit?: number;
+    minConfidence?: number;
+  }): Promise<Memory[]> {
+    return await this.knex('memories')
+      .select(['id', 'user_id', 'type', 'confidence', 'content', 'created_at'])
+      .where('user_id', user_id)
+      .whereIn('type', ['preference', 'fact'])
+      .andWhere('confidence', '>=', minConfidence)
+      .orderBy('confidence', 'desc')
+      .limit(limit);
+  }
+
   async listMemoriesBySimilarity({
     user_id,
     topK = 10,

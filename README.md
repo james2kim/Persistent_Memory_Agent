@@ -107,25 +107,41 @@ Permanent storage for extracted knowledge and documents:
 ## Workflow Nodes
 
 ### 1. retrievalGate
-Routes queries based on LLM assessment + deterministic policy.
+Routes queries based on rule-based classification + LLM fallback + deterministic policy.
 
-**Assessment** (Haiku - fast, cheap):
-- `queryType`: personal | study_content | general_knowledge | conversational | off_topic
-- `ambiguity`: low | moderate | high
-- `riskWithoutRetrieval`: low | moderate | high
+**Rule-Based Classification** (instant, free):
+Handles 60-70% of queries without LLM calls:
+- Greetings/thanks → `conversational`
+- Personal statements ("I am/like/prefer...") → `personal`
+- Personal questions ("my goal", "what did I say") → `personal`
+- Topic questions ("explain X", "what is Y") → `study_content`
+- Lifestyle advice ("should I nap?") → `off_topic`
+
+**LLM Assessment** (Haiku - for ambiguous cases):
+- `queryType`: personal | study_content | general_knowledge | conversational | off_topic | unclear
 - `referencesPersonalContext`: boolean
-- `referencesUploadedContent`: boolean
 
 **Policy** (deterministic):
 - `conversational` or `off_topic` → skip all retrieval
-- Everything else → search documents by default
-- `personal` queries also search memories
-- High ambiguity + no clear references → request clarification
+- `study_content` → search documents + memories (for personalization)
+- `personal` → search documents + memories with full budget
+- `unclear` → request clarification
 
 ### 2. retrieveMemoriesAndChunks
 Executes hybrid search based on gate decision.
 
-**Hybrid Search Pipeline:**
+**Two-Tier Memory Retrieval:**
+Profile memories (preferences, facts) are always relevant for personalization but don't match well via semantic similarity (e.g., "give me a code example" won't semantically match "prefers TypeScript"). Solution:
+
+1. **Tier 1 - Profile memories**: Fetch preferences + facts by confidence (no embedding needed)
+2. **Tier 2 - Contextual memories**: Similarity search for goals, decisions, summaries
+
+| Budget | Profile | Contextual | Total |
+|--------|---------|------------|-------|
+| Full   | 3       | 2          | 5     |
+| Minimal| 2       | 0          | 2     |
+
+**Hybrid Document Search Pipeline:**
 1. Extract temporal year from query (e.g., "what did I do in 2023" → 2023)
 2. Run in parallel:
    - **Embedding search**: pgvector cosine similarity with optional temporal filter
@@ -182,21 +198,34 @@ Pure semantic search misses queries like "what did I do in 2023" because embeddi
 - **Temporal filter**: `start_year <= queryYear AND (end_year IS NULL OR end_year >= queryYear)`
 - **RRF fusion**: Combines both rankings fairly
 
-### 2. Retrieval Gate (LLM Assessment + Deterministic Policy)
+### 2. Retrieval Gate (Rule-Based + LLM Fallback)
 
-Separates "understanding" from "deciding":
-- **LLM assessment**: Haiku classifies query characteristics (fast, cheap)
-- **Deterministic policy**: Code decides retrieval strategy (predictable, testable)
+Most queries can be classified without an LLM call:
+- **Rule-based filter**: Regex patterns handle greetings, personal statements, topic questions (~60-70% of queries)
+- **LLM fallback**: Haiku handles ambiguous cases that don't match patterns
+- **Deterministic policy**: Code decides retrieval strategy based on classification
 
-This avoids unpredictable LLM behavior in routing decisions while still leveraging LLM understanding.
+This reduces latency and cost while maintaining accuracy.
 
-### 3. Off-Topic Handling
+### 3. Two-Tier Memory Retrieval
+
+Pure semantic similarity fails for personalization queries:
+- "Give me a code example" doesn't semantically match "prefers TypeScript"
+- But the TypeScript preference is essential for good code generation
+
+Solution: separate profile retrieval from contextual retrieval:
+- **Profile memories** (preferences, facts): Always fetched by confidence, no embedding needed
+- **Contextual memories** (goals, decisions): Fetched by semantic similarity
+
+This ensures user preferences are always available for generation tasks without relying on embedding similarity.
+
+### 4. Off-Topic Handling
 
 Off-topic queries (stock tips, medical advice) skip retrieval entirely and get a clean redirect: "I'm a study assistant—happy to help with learning or organizing your notes."
 
 No mention of "I didn't find relevant documents" because that's confusing for genuinely off-topic questions.
 
-### 4. Session Summary Persistence
+### 5. Session Summary Persistence
 
 When a session goes stale (12+ hours inactive), the accumulated session summary is stored as a long-term memory. This captures:
 - Decisions made during the session
@@ -205,14 +234,14 @@ When a session goes stale (12+ hours inactive), the accumulated session summary 
 
 Even after the Redis session expires, this knowledge persists.
 
-### 5. U-Shape Context Distribution
+### 6. U-Shape Context Distribution
 
 Based on "Lost in the Middle" research showing LLMs attend poorly to middle content:
 - Most relevant → front (high attention)
 - Second most relevant → back (high attention)
 - Least relevant → middle (low attention)
 
-### 6. Document Title Citations
+### 7. Document Title Citations
 
 Sources cite document titles (e.g., `[Source: Resume.pdf]`) instead of opaque chunk indices, making responses more useful.
 
@@ -481,8 +510,8 @@ interface TraceOutcome {
 
 | Node | Metadata |
 |------|----------|
-| `retrievalGate` | queryType, ambiguity, shouldRetrieveDocuments, shouldRetrieveMemories |
-| `retrieveMemoriesAndChunks` | See detailed breakdown below |
+| `retrievalGate` | queryType, wasRewritten, shouldRetrieveDocuments, shouldRetrieveMemories |
+| `retrieveMemoriesAndChunks` | profileMemories, contextualMemories, chunksRetrieved (+ hybrid search diagnostics) |
 | `injectContext` | documentsUsed, memoriesUsed, contextTokens, responseLength |
 | `extractAndStoreKnowledge` | contentType, memoriesAdded, studyMaterialIngested |
 | `clarificationResponse` | responseLength |

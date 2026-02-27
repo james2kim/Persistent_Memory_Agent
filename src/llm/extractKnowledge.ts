@@ -64,7 +64,10 @@ export const extractKnowledge = async (input: string): Promise<KnowledgeExtracti
   } catch (err) {
     // Haiku sometimes struggles with nested structured outputs
     // Log and return null rather than crashing
-    console.warn('[extractKnowledge] Failed to parse extraction, skipping:', err instanceof Error ? err.message : err);
+    console.warn(
+      '[extractKnowledge] Failed to parse extraction, skipping:',
+      err instanceof Error ? err.message : err
+    );
     return null;
   }
 };

@@ -2,6 +2,7 @@ import type { AgentState, DocumentChunk, Memory } from '../../schemas/types';
 import { MemoryUtil } from '../../util/MemoryUtil';
 import { DocumentUtil, type RetrievalDiagnostics } from '../../util/DocumentUtil';
 import { DocumentStore } from '../../stores/DocumentStore';
+import { MemoryStore } from '../../stores/MemoryStore';
 import { db } from '../../db/knex';
 import { getUserId } from '../../config';
 import { TraceUtil } from '../../util/TraceUtil';
@@ -31,22 +32,42 @@ export const retrieveMemoriesAndChunks = async (state: AgentState) => {
   const retrievalTasks: Promise<void>[] = [];
   const documents: DocumentChunk[] = [];
   const memories: Memory[] = [];
+  let profileMemoryCount = 0;
+  let contextualMemoryCount = 0;
   let retrievalDiagnostics: RetrievalDiagnostics | null = null;
 
   if (decision?.shouldRetrieveMemories) {
-    // Use different limits based on memory budget
-    const isFullBudget = decision.memoryBudget === 'full';
-    const maxResults = isFullBudget ? 6 : 2;
-    const maxTokens = isFullBudget ? 500 : 200;
+    // Two-tier memory retrieval:
+    // 1. Always fetch profile memories (preferences + facts) - no embedding needed
+    // 2. Similarity search for contextual memories (goals, decisions, etc.)
 
+    const isFullBudget = decision.memoryBudget === 'full';
+    const profileLimit = isFullBudget ? 3 : 2;
+    const contextualLimit = isFullBudget ? 2 : 0;
+
+    // Tier 1: Profile memories (always relevant for personalization)
+    retrievalTasks.push(
+      MemoryStore.listProfileMemories({
+        user_id: userId,
+        limit: profileLimit,
+        minConfidence: 0.6,
+      }).then((profileMemories) => {
+        profileMemoryCount = profileMemories.length;
+        memories.push(...profileMemories);
+      })
+    );
+
+    // Tier 2: Contextual memories via similarity search (exclude preference/fact to avoid dupes)
     retrievalTasks.push(
       MemoryUtil.retrieveRelevantMemories(userId, query, {
-        maxResults,
-        maxTokens,
+        maxResults: contextualLimit,
+        maxTokens: isFullBudget ? 300 : 150,
         minConfidence: 0.5,
         queryEmbedding,
+        allowedTypes: ['goal', 'decision', 'summary'],
       }).then((result) => {
         if (result.success) {
+          contextualMemoryCount = result.memories.length;
           memories.push(...result.memories);
         }
       })
@@ -84,6 +105,8 @@ export const retrieveMemoriesAndChunks = async (state: AgentState) => {
   const traceMeta: Record<string, string | number | boolean | null> = {
     chunksRetrieved: documents.length,
     memoriesRetrieved: memories.length,
+    profileMemories: profileMemoryCount,
+    contextualMemories: contextualMemoryCount,
   };
 
   if (retrievalDiagnostics !== null) {
