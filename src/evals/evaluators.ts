@@ -517,10 +517,9 @@ export const runEvaluators = (
 
   // Content evaluators (only for ANSWER behavior)
   if (testCase.expected_behavior === 'ANSWER') {
-    // Optional forbidden list support
-    const forbidden = (testCase as any).answer_must_not_contain as string[] | undefined;
-    if (forbidden?.length) {
-      results.push(evaluateMustNotContain(output.response, forbidden));
+    // Negation check - ensures affirmative answers don't just contain keywords in negative context
+    if (testCase.answer_must_not_contain?.length) {
+      results.push(evaluateMustNotContain(output.response, testCase.answer_must_not_contain));
     }
 
     if (testCase.answer_includes?.length) {

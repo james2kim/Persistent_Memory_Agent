@@ -738,3 +738,145 @@ it('should retrieve documents for study content queries', async () => {
 **Test Configuration:**
 
 Tests use a 60-second timeout (configured in `vitest.config.ts`) to accommodate API latency. Environment variables are loaded via `src/__tests__/setup.ts`.
+
+## Evaluation Suite
+
+The evaluation suite tests end-to-end agent behavior with structured assertions. Unlike unit tests, these run the full agent pipeline and evaluate response quality.
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      Test Runner                            │
+│         (runLocal.ts or runExperiment.ts)                   │
+└─────────────────────┬───────────────────────────────────────┘
+                      │
+        ┌─────────────▼─────────────┐
+        │        Dataset            │
+        │      (dataset.ts)         │
+        │   Test cases with         │
+        │   expected behaviors      │
+        └─────────────┬─────────────┘
+                      │
+        ┌─────────────▼─────────────┐
+        │      Agent Invocation     │
+        │   Run query through       │
+        │   full agent pipeline     │
+        └─────────────┬─────────────┘
+                      │
+        ┌─────────────▼─────────────┐
+        │       Evaluators          │
+        │     (evaluators.ts)       │
+        │  Score response + trace   │
+        └─────────────┬─────────────┘
+                      │
+        ┌─────────────▼─────────────┐
+        │    Weighted Scoring       │
+        │  Critical evaluators      │
+        │  must pass (behavior)     │
+        └───────────────────────────┘
+```
+
+### Running Evaluations
+
+```bash
+# 1. Seed test fixtures (required once, or after changing fixtures)
+npx tsx src/evals/seed.ts
+
+# 2. Run local evaluations
+npx tsx src/evals/runLocal.ts
+
+# Run with verbose output
+npx tsx src/evals/runLocal.ts --verbose
+
+# Run specific category
+npx tsx src/evals/runLocal.ts --category off_topic
+
+# 3. Run with LangSmith tracking (requires LANGCHAIN_API_KEY)
+npx tsx src/evals/runExperiment.ts
+```
+
+### Test Categories
+
+| Category | Expected Behavior | What it tests |
+|----------|------------------|---------------|
+| `study_content` | ANSWER | Questions about documents/notes |
+| `personal` | ANSWER | User-specific info (goals, history) |
+| `temporal_containment` | ANSWER | Time-bound queries ("What did I do in 2023?") |
+| `off_topic` | REFUSE | Lifestyle/opinion questions (stocks, fashion) |
+| `unclear` | CLARIFY | Vague/ambiguous queries |
+
+### Evaluators
+
+Each evaluator returns a score (0-1), weight, and critical flag:
+
+| Evaluator | Weight | Critical | What it checks |
+|-----------|--------|----------|----------------|
+| `behavior` | 3.0 | Yes | ANSWER/REFUSE/CLARIFY matches expected |
+| `routing` | 2.0 | No | Gate classified query correctly |
+| `retrieval` | 1.0 | No | Retrieved when expected, skipped when not |
+| `budget` | 1.0 | No | Latency and token usage within thresholds |
+| `contains_any` | 1.5 | No | Response contains expected keywords |
+| `must_cover` | 1.5 | No | Response covers expected topics |
+| `amount` | 2.0 | No | Numeric values match expected |
+
+**Scoring:**
+- Critical evaluators must pass (score = 1.0) or entire test fails
+- Non-critical evaluators contribute to weighted average
+- Pass threshold: weighted score ≥ 70%
+
+### Behavior Detection
+
+The evaluator uses **trace-first** detection with text fallback:
+
+1. Check gate `queryType` from trace (most reliable)
+   - `off_topic` → REFUSE
+   - `needsClarification` → CLARIFY
+2. Fall back to response text pattern matching
+   - Refusal patterns: "I'm a study assistant", "outside my expertise", etc.
+   - Clarification patterns: "could you clarify", "what are you referring to", etc.
+
+### Test Fixtures
+
+Test documents are defined in `src/evals/fixtures/evalDocuments.ts` with fake data:
+
+| Document | Content |
+|----------|---------|
+| User Profile | Fake career info, severance ($42,500), work history |
+| Lost in Middle | Summary of position effects in LLM context |
+| ReAct Paper | Reasoning + acting framework explanation |
+| React Docs | JavaScript library overview |
+| Hair Loss | Finasteride vs dutasteride comparison |
+
+The seed script ingests these under a dedicated `EVAL_USER_ID` so tests run against consistent data regardless of your personal documents.
+
+### Adding New Test Cases
+
+1. Add the test case to `src/evals/dataset.ts`:
+
+```typescript
+{
+  userQuery: 'What is transformer architecture?',
+  category: 'study_content',
+  expected_behavior: 'ANSWER',
+  answer_must_contain_any: ['attention', 'encoder', 'decoder'],
+  dataset_split: ['base'],
+}
+```
+
+2. Add corresponding fixture document to `src/evals/fixtures/evalDocuments.ts` if needed
+
+3. Re-run seed: `npx tsx src/evals/seed.ts`
+
+4. Run evals: `npx tsx src/evals/runLocal.ts`
+
+### Files
+
+| File | Purpose |
+|------|---------|
+| `src/evals/dataset.ts` | Test cases with expected behaviors |
+| `src/evals/evaluators.ts` | Scoring functions (behavior, routing, content) |
+| `src/evals/runLocal.ts` | Local test runner (no external deps) |
+| `src/evals/runExperiment.ts` | LangSmith experiment runner |
+| `src/evals/seed.ts` | Seeds fixture documents into database |
+| `src/evals/fixtures/evalDocuments.ts` | Fake test documents |

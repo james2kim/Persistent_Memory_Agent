@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * LangSmith Experiment Runner
  *
@@ -7,16 +8,25 @@
  *   npx tsx src/evals/runExperiment.ts
  *   npx tsx src/evals/runExperiment.ts --split base
  *   npx tsx src/evals/runExperiment.ts --category off_topic
+ *
+ * Prerequisites:
+ *   Run `npx tsx src/evals/seed.ts` first to seed test data.
  */
 
+// Load env BEFORE any other imports (must be synchronous)
 import * as dotenv from 'dotenv';
 dotenv.config({ path: '.env.local' });
 
+// Set eval user ID for consistent test data retrieval
+import { EVAL_USER_ID } from './fixtures/evalDocuments';
+process.env.EVAL_USER_ID = EVAL_USER_ID;
+
+// Use separate LangSmith project for eval traces
+process.env.LANGCHAIN_PROJECT = 'study-agent-evals';
+
+// Now import non-agent modules
 import { Client } from 'langsmith';
 import { evaluate, type EvaluationResult as LSEvaluationResult } from 'langsmith/evaluation';
-import { buildWorkflow } from '../agent/graph';
-import { RedisSessionStore } from '../stores/RedisSessionStore';
-import { RedisCheckpointer } from '../memory/RedisCheckpointer';
 import {
   SMOKE_TEST_DATASET,
   getTestCasesBySplit,
@@ -26,6 +36,14 @@ import {
 } from './dataset';
 import { runEvaluators, calculateOverallScore, type AgentOutput } from './evaluators';
 import * as crypto from 'crypto';
+
+// Dynamic imports for modules that depend on env vars
+const loadAgentModules = async () => {
+  const { buildWorkflow } = await import('../agent/graph');
+  const { RedisSessionStore } = await import('../stores/RedisSessionStore');
+  const { RedisCheckpointer } = await import('../memory/RedisCheckpointer');
+  return { buildWorkflow, RedisSessionStore, RedisCheckpointer };
+};
 
 // LangSmith dataset name
 const DATASET_NAME = 'smoke-tests-v1';
@@ -94,7 +112,8 @@ interface AgentRunResult {
  */
 async function runAgent(
   inputs: { userQuery: string },
-  agentApp: ReturnType<typeof buildWorkflow>
+  agentApp: any,
+  redisStore: any
 ): Promise<AgentRunResult> {
   const sessionId = `eval-${crypto.randomUUID()}`;
   const startTime = Date.now();
@@ -117,8 +136,8 @@ async function runAgent(
 
     // Clean up session
     try {
-      await RedisSessionStore.getClient().del(`session:${sessionId}`);
-      await RedisSessionStore.getClient().del(`checkpoint:${sessionId}:latest`);
+      await redisStore.getClient().del(`session:${sessionId}`);
+      await redisStore.getClient().del(`checkpoint:${sessionId}:latest`);
     } catch {
       // Ignore cleanup errors
     }
@@ -232,6 +251,9 @@ async function main() {
   console.log(`Running ${testCases.length} test cases...`);
   console.log(`Experiment name: ${experimentName}`);
 
+  // Load agent modules (after env is loaded)
+  const { buildWorkflow, RedisSessionStore, RedisCheckpointer } = await loadAgentModules();
+
   // Connect to Redis
   await RedisSessionStore.connect();
   const checkpointer = new RedisCheckpointer(RedisSessionStore);
@@ -242,7 +264,7 @@ async function main() {
     await ensureDataset(testCases);
 
     // Create target function bound to agent
-    const target = (inputs: { userQuery: string }) => runAgent(inputs, agentApp);
+    const target = (inputs: { userQuery: string }) => runAgent(inputs, agentApp, RedisSessionStore);
 
     // Run evaluation
     const results = await evaluate(target, {
@@ -260,7 +282,9 @@ async function main() {
     let failed = 0;
 
     for await (const result of results) {
-      const evalResults = result.evaluationResults?.results as Array<{ key: string; score: number }> | undefined;
+      const evalResults = result.evaluationResults?.results as
+        | Array<{ key: string; score: number }>
+        | undefined;
       const overallResult = evalResults?.find((r) => r.key === 'overall');
       if (overallResult && overallResult.score >= 0.7) {
         passed++;

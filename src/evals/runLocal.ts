@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Local Smoke Test Runner
  *
@@ -20,6 +21,9 @@ dotenv.config({ path: '.env.local' });
 // Set eval user ID for consistent test data retrieval
 import { EVAL_USER_ID } from './fixtures/evalDocuments.js';
 process.env.EVAL_USER_ID = EVAL_USER_ID;
+
+// Use separate LangSmith project for eval traces
+process.env.LANGCHAIN_PROJECT = 'study-agent-evals';
 
 // Now import everything else
 import * as crypto from 'crypto';
@@ -117,7 +121,9 @@ async function runTests(
 
   for (let i = 0; i < testCases.length; i++) {
     const tc = testCases[i];
-    process.stdout.write(`\r[${i + 1}/${testCases.length}] Testing: ${tc.userQuery.slice(0, 40)}...`);
+    process.stdout.write(
+      `\r[${i + 1}/${testCases.length}] Testing: ${tc.userQuery.slice(0, 40)}...`
+    );
 
     const { output, durationMs } = await runAgent(tc.userQuery, agentApp, RedisSessionStore);
     const evalResults = runEvaluators(output, tc, durationMs);

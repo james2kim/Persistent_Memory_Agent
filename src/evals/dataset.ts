@@ -33,6 +33,7 @@ export interface SmokeTestCase {
   answer_includes?: string[];
   answer_must_contain_any?: string[];
   answer_should_contain?: string[];
+  answer_must_not_contain?: string[];
   must_cover?: string[];
   expected_amount_usd?: number;
   dataset_split?: string[];
@@ -44,7 +45,9 @@ export const SMOKE_TEST_DATASET: SmokeTestCase[] = [
     userQuery: 'What did I do in 2023?',
     category: 'temporal_containment',
     expected_behavior: 'ANSWER',
-    answer_must_contain_any: ['DataFlow', '2022', 'present'],
+    answer_must_contain_any: ['DataFlow'],
+    // Ensure it's an affirmative answer, not "I don't know about DataFlow"
+    answer_must_not_contain: ["don't have information", "don't know", 'no record', 'unable to find'],
     dataset_split: ['base'],
   },
 
@@ -99,8 +102,10 @@ export const SMOKE_TEST_DATASET: SmokeTestCase[] = [
     userQuery: 'is finasteride > dutasteride?',
     category: 'study_content',
     expected_behavior: 'ANSWER',
-    // Should indicate dutasteride is more effective
-    answer_must_contain_any: ['dutasteride', 'more effective', 'outperform', 'superior'],
+    // Should indicate dutasteride is more effective (the question asks if finasteride > dutasteride, answer should be NO)
+    answer_must_contain_any: ['dutasteride'],
+    // Ensure response indicates dutasteride is better, not finasteride
+    answer_must_not_contain: ['finasteride is more effective', 'finasteride outperforms', 'finasteride is superior'],
     dataset_split: ['base'],
   },
   {
@@ -150,6 +155,7 @@ export const SMOKE_TEST_DATASET: SmokeTestCase[] = [
     category: 'personal',
     expected_behavior: 'ANSWER',
     answer_must_contain_any: ['machine learning', 'ML', 'NLP', 'engineer'],
+    answer_must_not_contain: ["don't have", "don't know", 'no information'],
     dataset_split: ['base'],
   },
   {
@@ -157,13 +163,16 @@ export const SMOKE_TEST_DATASET: SmokeTestCase[] = [
     category: 'personal',
     expected_behavior: 'ANSWER',
     answer_should_contain: ['Python'],
+    answer_must_not_contain: ["don't have", "don't know", 'no information'],
     dataset_split: ['base'],
   },
   {
     userQuery: 'Where did I work in 2021?',
     category: 'personal',
     expected_behavior: 'ANSWER',
-    answer_should_contain: ['Sunrise', 'Labs'],
+    answer_should_contain: ['Sunrise'],
+    // Ensure it's affirmative, not "I don't see Sunrise Labs in your records"
+    answer_must_not_contain: ["don't have", "don't see", 'no record', 'unable to find', "couldn't find"],
     dataset_split: ['base'],
   },
 ];
