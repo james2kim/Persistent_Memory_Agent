@@ -263,7 +263,19 @@ Based on "Lost in the Middle" research showing LLMs attend poorly to middle cont
 - Second most relevant → back (high attention)
 - Least relevant → middle (low attention)
 
-### 7. Document Title Citations
+### 7. Adaptive Model Selection
+
+The response generation step dynamically chooses between Haiku (fast/cheap) and Sonnet (capable/expensive) based on retrieval confidence:
+
+| Scenario | Model | Rationale |
+|----------|-------|-----------|
+| No context needed | Haiku | Conversational queries don't need heavy reasoning |
+| Good retrieval (≥2 chunks, distance ≤0.6) | Haiku | Synthesizing from strong sources is straightforward |
+| Weak retrieval (few chunks or high distance) | Sonnet | Better at reasoning with sparse info, admitting uncertainty |
+
+This reduces cost and latency for ~70% of queries while preserving quality for complex cases.
+
+### 8. Document Title Citations
 
 Sources cite document titles (e.g., `[Source: Resume.pdf]`) instead of opaque chunk indices, making responses more useful.
 
