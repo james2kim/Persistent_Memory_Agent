@@ -178,11 +178,33 @@ Cellular respiration is the process...
 ```
 
 ### 4. extractAndStoreKnowledge
-Background extraction of knowledge from the conversation.
+Background extraction of knowledge from the conversation (runs async, doesn't block response).
 
-- Extracts facts, goals, preferences, decisions
+**Knowledge Extraction:**
+- Classifies input as `study_material`, `personal_memory`, or `ephemeral`
+- Study material → ingested as document chunks with embeddings
+- Personal memory → stored with type classification:
+  - `preference`: User likes/prefers something (language, tools, learning style)
+  - `fact`: Objective info (job, school, current projects)
+  - `goal`: Future-oriented aspirations
+  - `decision`: Past choices made
 - Deduplicates against existing memories (cosine similarity ≥ 0.9)
-- Triggers message summarization when conversation gets long
+
+**Message Summarization (Background):**
+Prevents unbounded context growth while preserving important information.
+
+| Trigger | Action |
+|---------|--------|
+| Messages reach 15 | Summarize oldest 10, keep newest 5 |
+| Result | Messages oscillate between 5-15 |
+
+```
+Before: [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15]
+                    ↓ summarize oldest 10
+After:  [summary] + [m11, m12, m13, m14, m15]
+```
+
+The summary is appended to the session's running summary, preserving context across pruning cycles.
 
 ### 5. clarificationResponse
 Handles ambiguous queries by asking for clarification.
@@ -249,7 +271,6 @@ Sources cite document titles (e.g., `[Source: Resume.pdf]`) instead of opaque ch
 
 ```
 src/
-├── main.ts                    # CLI entry point
 ├── server.ts                  # Express API server
 ├── config.ts                  # User ID management
 │
@@ -347,15 +368,14 @@ npm run migrate:rollback
 ### Running
 
 ```bash
-# CLI mode
+# Start server
 npm start
 
-# Web server (API + UI)
-npm run server
-
 # Development with hot reload
-npm run server:dev
+npm run dev
 ```
+
+Then open `http://localhost:3000`
 
 ## API Endpoints
 

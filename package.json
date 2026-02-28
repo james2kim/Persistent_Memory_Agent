@@ -5,10 +5,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "tsx src/main.ts",
-    "dev": "tsx watch src/main.ts",
-    "server": "tsx src/server.ts",
-    "server:dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "dev": "tsx watch src/server.ts",
     "lint": "eslint src/",
     "format": "prettier --write src/",
     "test": "vitest run",
