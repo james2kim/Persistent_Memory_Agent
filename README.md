@@ -7,7 +7,7 @@ A conversational AI study assistant with persistent memory, document RAG, and in
 - **Persistent Memory** - Extracts and stores facts, goals, preferences, and decisions from conversations
 - **Document RAG** - Upload and query documents with hybrid search (semantic + keyword + temporal)
 - **Session Continuity** - Redis-backed sessions with automatic summary archival to long-term memory
-- **Smart Retrieval** - LLM-powered retrieval gate decides when to search documents vs. memories vs. neither
+- **Smart Retrieval** - Hybrid Rule-Based and LLM-powered retrieval gate that decides when to search documents vs. memories vs. neither
 
 ## Architecture Overview
 
