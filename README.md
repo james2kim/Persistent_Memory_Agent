@@ -1,6 +1,6 @@
 # Persistent Memory Study Agent
 
-A conversational AI study assistant with persistent memory, document RAG, and intelligent retrieval. Built with LangGraph, PostgreSQL (pgvector), and Redis.
+A conversational AI study assistant with persistent memory, document RAG, and intelligent retrieval. Built with LangGraph, React, PostgreSQL (pgvector), and Redis.
 
 ## Features
 
@@ -8,6 +8,7 @@ A conversational AI study assistant with persistent memory, document RAG, and in
 - **Document RAG** - Upload and query documents with hybrid search (semantic + keyword + temporal)
 - **Session Continuity** - Redis-backed sessions with automatic summary archival to long-term memory
 - **Smart Retrieval** - Hybrid Rule-Based and LLM-powered retrieval gate that decides when to search documents vs. memories vs. neither
+- **React Web UI** - Mobile-responsive chat interface with document upload and markdown rendering
 
 ## Architecture Overview
 
