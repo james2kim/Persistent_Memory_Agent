@@ -10,6 +10,22 @@ export const isoDateString = z.string().refine((v) => !Number.isNaN(Date.parse(v
   message: 'Invalid ISO date string',
 });
 
+// --- User Schemas ---
+export const userSchema = z.object({
+  id: z.uuid(),
+  email: z.string().email(),
+  password_hash: z.string().nullable(),
+  name: z.string().nullable(),
+  created_at: z.union([isoDateString, z.date()]),
+  updated_at: z.union([isoDateString, z.date()]),
+});
+
+export const createUserSchema = z.object({
+  email: z.string().email(),
+  password_hash: z.string().optional(),
+  name: z.string().optional(),
+});
+
 // --- Memory Schemas ---
 export const memoryExtractionSchema = z.object({
   worth_keeping: z.boolean(),
@@ -287,6 +303,10 @@ export const AgentStateSchema = new StateSchema({
 // ============================================================================
 // TYPES
 // ============================================================================
+
+// --- User Types ---
+export type User = z.infer<typeof userSchema>;
+export type CreateUser = z.infer<typeof createUserSchema>;
 
 // --- Memory Types ---
 export type MemoryExtraction = z.infer<typeof memoryExtractionSchema>;

@@ -6,13 +6,14 @@ import multer from 'multer';
 import crypto from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { clerkMiddleware, getAuth, requireAuth } from '@clerk/express';
 
 import { PDFLoader } from '@langchain/community/document_loaders/fs/pdf';
 import { DocxLoader } from '@langchain/community/document_loaders/fs/docx';
 
 import { RedisSessionStore } from './stores/RedisSessionStore';
 import { RedisCheckpointer } from './memory/RedisCheckpointer';
-import { getUserId } from './config';
+import { UserStore } from './stores/UserStore';
 import { buildWorkflow } from './agent/graph';
 import { ingestDocument } from './ingest/ingestDocument';
 import { DocumentStore } from './stores/DocumentStore';
@@ -109,6 +110,7 @@ const PORT = process.env.PORT ?? 3000;
 
 // Middleware
 app.use(express.json());
+app.use(clerkMiddleware());
 app.use(express.static(path.join(__dirname, '../public')));
 
 // Configure multer for file uploads
@@ -116,29 +118,55 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 // Global state (initialized on startup)
 let agentApp: ReturnType<typeof buildWorkflow>;
-let sessionId: string;
-let userId: string;
 let documentStore: DocumentStore;
 
-// Initialize the agent and session
+// Cache for user sessions (userId -> sessionId)
+const userSessions = new Map<string, string>();
+
+// Get or create user from Clerk auth
+async function getOrCreateUser(clerkUserId: string, email?: string): Promise<string> {
+  // Check if user exists with this Clerk ID stored in email field (temporary mapping)
+  // In production, you'd have a clerk_id column
+  let user = await UserStore.findByEmail(email ?? `clerk_${clerkUserId}@temp.local`);
+
+  if (!user) {
+    user = await UserStore.create({
+      email: email ?? `clerk_${clerkUserId}@temp.local`,
+      name: undefined,
+    });
+    console.log(`Created new user: ${user.id} for Clerk user: ${clerkUserId}`);
+  }
+
+  return user.id;
+}
+
+// Get session for authenticated user
+async function getUserSession(userId: string): Promise<string> {
+  let sessionId = userSessions.get(userId);
+
+  if (!sessionId) {
+    const session = await RedisSessionStore.getOrCreateSession(userId);
+    sessionId = session.sessionId;
+    userSessions.set(userId, sessionId);
+  }
+
+  return sessionId;
+}
+
+// Initialize the agent and stores
 async function initialize() {
   console.log('Connecting to Redis...');
   await RedisSessionStore.connect();
 
   const checkpointer = new RedisCheckpointer(RedisSessionStore);
-  userId = getUserId();
-  const session = await RedisSessionStore.getOrCreateSession(userId);
-  sessionId = session.sessionId;
-
   agentApp = buildWorkflow(checkpointer);
   documentStore = new DocumentStore(db, 1024);
 
-  console.log(`Session initialized: ${sessionId}`);
-  console.log(`User ID: ${userId}`);
+  console.log('Server initialized');
 }
 
 // Helper to get formatted response from the agent
-async function getFormattedAnswerToUserinput(userQuery: string) {
+async function getFormattedAnswerToUserinput(userQuery: string, sessionId: string) {
   const userMessage = {
     id: crypto.randomUUID(),
     role: 'user',
@@ -160,15 +188,24 @@ async function getFormattedAnswerToUserinput(userQuery: string) {
 // API Routes
 
 // POST /api/chat - Send a message and get a response
-app.post('/api/chat', async (req, res) => {
+app.post('/api/chat', requireAuth(), async (req, res) => {
   try {
+    const { userId: clerkUserId } = getAuth(req);
+    if (!clerkUserId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
     const { message, includeTrace } = req.body;
 
     if (!message || typeof message !== 'string') {
       return res.status(400).json({ error: 'Message is required' });
     }
 
-    const result = await getFormattedAnswerToUserinput(message);
+    // Get or create user and session
+    const userId = await getOrCreateUser(clerkUserId);
+    const sessionId = await getUserSession(userId);
+
+    const result = await getFormattedAnswerToUserinput(message, sessionId);
     const trace = result?.trace as AgentTrace | undefined;
 
     // Log trace summary
@@ -227,11 +264,18 @@ app.post('/api/chat', async (req, res) => {
 });
 
 // POST /api/upload - Upload a document for ingestion
-app.post('/api/upload', upload.single('file'), async (req, res) => {
+app.post('/api/upload', requireAuth(), upload.single('file'), async (req, res) => {
   try {
+    const { userId: clerkUserId } = getAuth(req);
+    if (!clerkUserId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });
     }
+
+    const userId = await getOrCreateUser(clerkUserId);
 
     const { originalname, buffer, mimetype } = req.file;
     const ext = path.extname(originalname).toLowerCase();
@@ -291,8 +335,15 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
 });
 
 // GET /api/session - Get current session info
-app.get('/api/session', async (req, res) => {
+app.get('/api/session', requireAuth(), async (req, res) => {
   try {
+    const { userId: clerkUserId } = getAuth(req);
+    if (!clerkUserId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const userId = await getOrCreateUser(clerkUserId);
+    const sessionId = await getUserSession(userId);
     const { state } = await RedisSessionStore.getSession(sessionId, userId);
 
     console.log('[/api/session] Session ID:', sessionId);
@@ -374,8 +425,16 @@ app.get('/api/session', async (req, res) => {
 });
 
 // GET /api/trace - Get the latest trace from the session
-app.get('/api/trace', async (req, res) => {
+app.get('/api/trace', requireAuth(), async (req, res) => {
   try {
+    const { userId: clerkUserId } = getAuth(req);
+    if (!clerkUserId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const userId = await getOrCreateUser(clerkUserId);
+    const sessionId = await getUserSession(userId);
+
     // Get the latest checkpoint which contains the trace
     const checkpointKey = `checkpoint:${sessionId}:latest`;
     const checkpointRaw = await RedisSessionStore.getClient().get(checkpointKey);

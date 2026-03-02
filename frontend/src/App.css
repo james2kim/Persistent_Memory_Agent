@@ -22,12 +22,47 @@ header {
   background: #2c3e50;
   color: white;
   padding: 1rem;
-  text-align: center;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  position: relative;
 }
 
 header h1 {
   font-size: 1.25rem;
   font-weight: 500;
+}
+
+.header-actions {
+  position: absolute;
+  right: 1rem;
+}
+
+.auth-container {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 2rem;
+}
+
+.auth-card {
+  background: white;
+  padding: 2rem;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  text-align: center;
+  max-width: 400px;
+}
+
+.auth-card h2 {
+  margin-bottom: 0.5rem;
+  color: #2c3e50;
+}
+
+.auth-card p {
+  color: #666;
+  margin-bottom: 1.5rem;
 }
 
 .container {

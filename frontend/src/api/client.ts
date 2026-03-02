@@ -24,10 +24,23 @@ export interface SessionMessage {
   text?: string;
 }
 
-export async function sendMessage(message: string): Promise<ChatResponse> {
+async function getAuthHeaders(getToken: () => Promise<string | null>): Promise<HeadersInit> {
+  const token = await getToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+export async function sendMessage(
+  message: string,
+  getToken: () => Promise<string | null>
+): Promise<ChatResponse> {
+  const authHeaders = await getAuthHeaders(getToken);
+
   const response = await fetch('/api/chat', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...authHeaders,
+    },
     body: JSON.stringify({ message }),
   });
 
@@ -39,12 +52,17 @@ export async function sendMessage(message: string): Promise<ChatResponse> {
   return response.json();
 }
 
-export async function uploadFile(file: File): Promise<UploadResponse> {
+export async function uploadFile(
+  file: File,
+  getToken: () => Promise<string | null>
+): Promise<UploadResponse> {
+  const authHeaders = await getAuthHeaders(getToken);
   const formData = new FormData();
   formData.append('file', file);
 
   const response = await fetch('/api/upload', {
     method: 'POST',
+    headers: authHeaders,
     body: formData,
   });
 
@@ -56,8 +74,14 @@ export async function uploadFile(file: File): Promise<UploadResponse> {
   return response.json();
 }
 
-export async function getSession(): Promise<SessionResponse | null> {
-  const response = await fetch('/api/session');
+export async function getSession(
+  getToken: () => Promise<string | null>
+): Promise<SessionResponse | null> {
+  const authHeaders = await getAuthHeaders(getToken);
+
+  const response = await fetch('/api/session', {
+    headers: authHeaders,
+  });
 
   if (!response.ok) {
     return null;

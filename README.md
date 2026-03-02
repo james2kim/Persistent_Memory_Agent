@@ -9,6 +9,7 @@ A conversational AI study assistant with persistent memory, document RAG, and in
 - **Session Continuity** - Redis-backed sessions with automatic summary archival to long-term memory
 - **Smart Retrieval** - Hybrid Rule-Based and LLM-powered retrieval gate that decides when to search documents vs. memories vs. neither
 - **React Web UI** - Mobile-responsive chat interface with document upload and markdown rendering
+- **User Authentication** - Clerk-based auth with automatic user provisioning and per-user data isolation
 
 ## Architecture Overview
 
@@ -280,6 +281,20 @@ This reduces cost and latency for ~70% of queries while preserving quality for c
 
 Sources cite document titles (e.g., `[Source: Resume.pdf]`) instead of opaque chunk indices, making responses more useful.
 
+### 9. Authentication with Clerk
+
+Authentication is handled by Clerk, a managed auth service. This was chosen over building custom auth because:
+- Not the focus of this project (learning agent architecture, not auth)
+- Production-ready security out of the box
+- Simple integration with React and Express
+
+**Authentication Flow:**
+1. User signs in via Clerk modal (supports email, OAuth providers)
+2. Frontend passes JWT token with each API request via `Authorization: Bearer <token>`
+3. Backend verifies token via `requireAuth()` middleware from `@clerk/express`
+4. `getOrCreateUser()` finds or creates a user record in PostgreSQL linked to the Clerk ID
+5. All data (memories, documents, sessions) is scoped to the authenticated user
+
 ## Project Structure
 
 ```
@@ -314,7 +329,8 @@ Sources cite document titles (e.g., `[Source: Resume.pdf]`) instead of opaque ch
     ├── stores/
     │   ├── DocumentStore.ts     # Hybrid search, chunk management
     │   ├── MemoryStore.ts       # Long-term memory operations
-    │   └── RedisSessionStore.ts # Session state management
+    │   ├── RedisSessionStore.ts # Session state management
+    │   └── UserStore.ts         # User CRUD operations
     │
     ├── memory/
     │   └── RedisCheckpointer.ts # LangGraph checkpoint persistence
@@ -373,12 +389,21 @@ psql -d study_agent -c "CREATE EXTENSION IF NOT EXISTS vector;"
 cp .env.example .env.local
 ```
 
-**Required environment variables:**
+**Required environment variables (.env.local):**
 ```
 ANTHROPIC_API_KEY=sk-ant-...
 VOYAGE_API_KEY=pa-...
 REDIS_URL=redis://localhost:6379
 DATABASE_URL=postgresql://localhost:5432/study_agent
+
+# Clerk Authentication (get keys from https://dashboard.clerk.com)
+CLERK_PUBLISHABLE_KEY=pk_test_...
+CLERK_SECRET_KEY=sk_test_...
+```
+
+**Frontend environment variables (frontend/.env.local):**
+```
+VITE_CLERK_PUBLISHABLE_KEY=pk_test_...
 ```
 
 ### Database Migrations
@@ -422,6 +447,11 @@ npm run frontend
 ```
 
 ## API Endpoints
+
+All endpoints require authentication via Clerk. Include the JWT token in the `Authorization` header:
+```
+Authorization: Bearer <clerk_jwt_token>
+```
 
 ### POST /api/chat
 Send a message and get a response.
