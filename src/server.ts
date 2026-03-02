@@ -409,8 +409,8 @@ app.get('/api/trace', async (req, res) => {
   }
 });
 
-// Serve index.html for root
-app.get('/', (req, res) => {
+// SPA fallback - serve index.html for all non-API routes
+app.get('/{*splat}', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/index.html'));
 });
 

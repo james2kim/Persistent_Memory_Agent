@@ -282,53 +282,65 @@ Sources cite document titles (e.g., `[Source: Resume.pdf]`) instead of opaque ch
 ## Project Structure
 
 ```
-src/
-├── server.ts                  # Express API server
-├── config.ts                  # User ID management
+├── frontend/                    # React frontend (Vite)
+│   ├── src/
+│   │   ├── components/          # React components
+│   │   ├── hooks/               # Custom hooks (useChat)
+│   │   ├── api/                 # API client
+│   │   ├── utils/               # Markdown formatting
+│   │   └── App.tsx              # Main app component
+│   ├── package.json
+│   └── vite.config.ts           # Builds to public/
 │
-├── agent/
-│   ├── graph.ts               # LangGraph workflow definition
-│   ├── routers.ts             # Conditional routing logic
-│   ├── constants.ts           # Models, limits, system prompt
-│   └── nodes/
-│       ├── retrievalGate.ts
-│       ├── retrieveMemoriesAndChunks.ts
-│       ├── injectContext.ts
-│       ├── extractKnowledge.ts
-│       ├── clarificationResponse.ts
-│       └── summarize.ts
+├── public/                      # Built frontend (served by Express)
 │
-├── stores/
-│   ├── DocumentStore.ts       # Hybrid search, chunk management
-│   ├── MemoryStore.ts         # Long-term memory operations
-│   └── RedisSessionStore.ts   # Session state management
-│
-├── memory/
-│   └── RedisCheckpointer.ts   # LangGraph checkpoint persistence
-│
-├── llm/
-│   ├── retrievalAssessor.ts   # Query classification
-│   ├── promptBuilder.ts       # Context block + system prompt
-│   ├── summarizeMessages.ts   # Conversation summarization
-│   └── extractMemories.ts     # Knowledge extraction
-│
-├── ingest/
-│   └── ingestDocument.ts      # Document chunking + embedding
-│
-├── services/
-│   └── EmbeddingService.ts    # VoyageAI embeddings
-│
-├── util/
-│   ├── DocumentUtil.ts        # Text chunking
-│   ├── TemporalUtil.ts        # Date range extraction
-│   └── EmbeddingUtil.ts       # Vector formatting
-│
-├── schemas/
-│   └── types.ts               # Zod schemas and TypeScript types
-│
-└── db/
-    ├── knex.ts                # Database connection
-    └── migrations/            # PostgreSQL migrations
+└── src/
+    ├── server.ts                # Express API server
+    ├── config.ts                # User ID management
+    │
+    ├── agent/
+    │   ├── graph.ts             # LangGraph workflow definition
+    │   ├── routers.ts           # Conditional routing logic
+    │   ├── constants.ts         # Models, limits, system prompt
+    │   └── nodes/
+    │       ├── retrievalGate.ts
+    │       ├── retrieveMemoriesAndChunks.ts
+    │       ├── injectContext.ts
+    │       ├── extractKnowledge.ts
+    │       ├── clarificationResponse.ts
+    │       └── summarize.ts
+    │
+    ├── stores/
+    │   ├── DocumentStore.ts     # Hybrid search, chunk management
+    │   ├── MemoryStore.ts       # Long-term memory operations
+    │   └── RedisSessionStore.ts # Session state management
+    │
+    ├── memory/
+    │   └── RedisCheckpointer.ts # LangGraph checkpoint persistence
+    │
+    ├── llm/
+    │   ├── retrievalAssessor.ts # Query classification
+    │   ├── promptBuilder.ts     # Context block + system prompt
+    │   ├── summarizeMessages.ts # Conversation summarization
+    │   └── extractMemories.ts   # Knowledge extraction
+    │
+    ├── ingest/
+    │   └── ingestDocument.ts    # Document chunking + embedding
+    │
+    ├── services/
+    │   └── EmbeddingService.ts  # VoyageAI embeddings
+    │
+    ├── util/
+    │   ├── DocumentUtil.ts      # Text chunking
+    │   ├── TemporalUtil.ts      # Date range extraction
+    │   └── EmbeddingUtil.ts     # Vector formatting
+    │
+    ├── schemas/
+    │   └── types.ts             # Zod schemas and TypeScript types
+    │
+    └── db/
+        ├── knex.ts              # Database connection
+        └── migrations/          # PostgreSQL migrations
 ```
 
 ## Setup
@@ -344,6 +356,7 @@ src/
 ```bash
 # Install dependencies
 npm install
+npm run frontend:install
 
 # Start Redis (macOS)
 brew services start redis
@@ -380,14 +393,32 @@ npm run migrate:rollback
 ### Running
 
 ```bash
-# Start server
-npm start
-
-# Development with hot reload
+# Development (builds frontend + starts server with hot reload)
 npm run dev
+
+# Development with frontend hot reload (two servers, use port 5173)
+npm run dev:watch
+
+# Production
+npm start
 ```
 
 Then open `http://localhost:3000`
+
+### Frontend Development
+
+The frontend is a React app built with Vite. It builds to `public/` and is served by Express.
+
+```bash
+# Install frontend dependencies (first time)
+npm run frontend:install
+
+# Build frontend only
+npm run frontend:build
+
+# Run frontend dev server only (with API proxy to :3000)
+npm run frontend
+```
 
 ## API Endpoints
 

@@ -1,5 +1,9 @@
 # dependencies
 /node_modules
+/frontend/node_modules
+
+# build output
+/public
 
 # env files
 .env*
