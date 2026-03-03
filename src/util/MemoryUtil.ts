@@ -21,7 +21,44 @@ const MAX_AGE_BY_TYPE = {
   decision: 30,
 };
 
+// Patterns that indicate prompt injection attempts in memory content
+const INJECTION_PATTERNS = [
+  /ignore\s+(all\s+)?(previous|prior|above|earlier)\s+instructions/i,
+  /disregard\s+(all\s+)?(previous|prior|above|earlier)\s+instructions/i,
+  /forget\s+(all\s+)?your\s+instructions/i,
+  /you\s+are\s+(now|no\s+longer)\b/i,
+  /new\s+(role|instructions|rules)\s*:/i,
+  /act\s+as\s+(a|an|if)\b/i,
+  /pretend\s+(to\s+be|you\s+are)/i,
+  /system\s*prompt/i,
+  /\boverride\s+(all|system|instructions|rules)\b/i,
+  /\bjailbreak\b/i,
+  /\badmin\s+(access|mode|privilege)/i,
+  /output\s+(the|your|all)\s+(system|previous|internal)/i,
+  /reveal\s+(the|your)\s+(system|internal|secret)/i,
+];
+
+const MAX_MEMORY_LENGTH = 500;
+
 export const MemoryUtil = {
+  /**
+   * Validates memory content before storage to prevent prompt injection poisoning.
+   * Returns { valid: true } or { valid: false, reason: string }.
+   */
+  validateMemoryContent(content: string): { valid: true } | { valid: false; reason: string } {
+    if (content.length > MAX_MEMORY_LENGTH) {
+      return { valid: false, reason: `content too long (${content.length}/${MAX_MEMORY_LENGTH} chars)` };
+    }
+
+    for (const pattern of INJECTION_PATTERNS) {
+      if (pattern.test(content)) {
+        return { valid: false, reason: `matches injection pattern: ${pattern.source}` };
+      }
+    }
+
+    return { valid: true };
+  },
+
   shouldSummarize(messages: Message[], maxMessages = 15) {
     return messages.length >= maxMessages;
   },

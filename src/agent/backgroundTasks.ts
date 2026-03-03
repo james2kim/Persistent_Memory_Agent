@@ -6,6 +6,7 @@ import { DocumentStore } from '../stores/DocumentStore';
 import { defaultEmbedding } from '../services/EmbeddingService';
 import { ingestDocument } from '../ingest/ingestDocument';
 import { db } from '../db/knex';
+import { MemoryUtil } from '../util/MemoryUtil';
 import { MESSAGES_TO_SUMMARIZE, MESSAGES_TO_KEEP } from './constants';
 import type { BaseMessage } from '@langchain/core/messages';
 
@@ -119,6 +120,12 @@ export async function runBackgroundExtraction(
       let added = 0;
 
       for (const mem of validMemories) {
+        const validation = MemoryUtil.validateMemoryContent(mem.content);
+        if (!validation.valid) {
+          console.warn(`[backgroundExtraction] Rejected memory: ${validation.reason}`);
+          continue;
+        }
+
         const embedding = await defaultEmbedding.embedText(mem.content);
         const memory = {
           user_id: userId,
