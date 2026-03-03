@@ -4,6 +4,7 @@ import { RedisSessionStore } from '../stores/RedisSessionStore';
 import { RedisCheckpointer } from '../memory/RedisCheckpointer';
 import type { AgentTrace } from '../schemas/types';
 import crypto from 'crypto';
+import { TEST_USER_ID } from './fixtures/testDocuments';
 
 /**
  * Integration Tests for Agent Workflow
@@ -27,6 +28,7 @@ async function runAgent(query: string): Promise<{ response?: string; trace?: Age
     {
       messages: [userMessage],
       userQuery: query,
+      userId: TEST_USER_ID,
     },
     { configurable: { thread_id: sessionId } }
   );

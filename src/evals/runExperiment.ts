@@ -17,9 +17,7 @@
 import * as dotenv from 'dotenv';
 dotenv.config({ path: '.env.local' });
 
-// Set eval user ID for consistent test data retrieval
 import { EVAL_USER_ID } from './fixtures/evalDocuments';
-process.env.EVAL_USER_ID = EVAL_USER_ID;
 
 // Use separate LangSmith project for eval traces
 process.env.LANGCHAIN_PROJECT = 'study-agent-evals';
@@ -130,6 +128,7 @@ async function runAgent(
       {
         messages: [userMessage],
         userQuery: inputs.userQuery,
+        userId: EVAL_USER_ID,
       },
       { configurable: { thread_id: sessionId } }
     );

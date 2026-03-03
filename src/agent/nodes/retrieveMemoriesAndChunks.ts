@@ -4,7 +4,6 @@ import { DocumentUtil, type RetrievalDiagnostics } from '../../util/DocumentUtil
 import { DocumentStore } from '../../stores/DocumentStore';
 import { MemoryStore } from '../../stores/MemoryStore';
 import { db } from '../../db/knex';
-import { getUserId } from '../../config';
 import { TraceUtil } from '../../util/TraceUtil';
 
 const documentStore = new DocumentStore(db, 1024);
@@ -15,7 +14,7 @@ export const retrieveMemoriesAndChunks = async (state: AgentState) => {
 
   const decision = state.gateDecision;
   const query = state.userQuery;
-  const userId = getUserId();
+  const userId = state.userId;
   const queryEmbedding = state.queryEmbedding;
 
   if (!queryEmbedding) {

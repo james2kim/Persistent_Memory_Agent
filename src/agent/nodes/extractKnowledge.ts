@@ -2,7 +2,6 @@ import type { AgentState } from '../../schemas/types';
 import { extractKnowledge } from '../../llm/extractKnowledge';
 import { MemoryStore } from '../../stores/MemoryStore';
 import { DocumentStore } from '../../stores/DocumentStore';
-import { getUserId } from '../../config';
 import { defaultEmbedding } from '../../services/EmbeddingService';
 import { ingestDocument } from '../../ingest/ingestDocument';
 import { db } from '../../db/knex';
@@ -14,7 +13,7 @@ export const extractAndStoreKnowledge = async (state: AgentState) => {
   const span = TraceUtil.startSpan('extractAndStoreKnowledge');
   let trace = state.trace!;
 
-  const userId = getUserId();
+  const userId = state.userId;
 
   // Classify and extract knowledge from user query
   const extraction = await extractKnowledge(state.userQuery);

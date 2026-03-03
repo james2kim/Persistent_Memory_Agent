@@ -100,7 +100,7 @@ Permanent storage for extracted knowledge and documents:
 | Field | Description |
 |-------|-------------|
 | `content` | Chunk text |
-| `embedding` | vector for cosine similarity |
+| `embedding` | vector for cosine similarity (HNSW indexed) |
 | `search_vector` | tsvector for BM25 keyword search |
 | `start_year` | Temporal range start (extracted) |
 | `end_year` | Temporal range end (null = "Present") |
@@ -213,7 +213,20 @@ Handles ambiguous queries by asking for clarification.
 
 ## Key Architecture Decisions
 
-### 1. Hybrid Search with Temporal Filtering
+### 1. HNSW Vector Index
+
+Similarity search on the `chunks.embedding` column uses an HNSW (Hierarchical Navigable Small World) index instead of sequential scan. HNSW builds a multi-layered graph over the vectors — top layers have sparse, long-range connections for coarse navigation, bottom layers have dense, short-range connections for precise lookup. Search traverses top-down in O(log n) hops rather than computing distance against every row (O(n)).
+
+| Parameter | Value | Effect |
+|-----------|-------|--------|
+| `m` | 16 | Max connections per node. Higher = better recall, more memory |
+| `ef_construction` | 64 | Build-time candidate list. Higher = better graph quality, slower builds |
+| `ef_search` | 40 (pgvector default) | Query-time candidate list. Tunable per-query via `SET hnsw.ef_search` |
+| Operator class | `vector_cosine_ops` | Matches the `<=>` cosine distance operator used in queries |
+
+Tradeoff: ~99%+ recall vs exact search, which is negligible — chunking strategy and embedding quality are the actual retrieval bottlenecks.
+
+### 2. Hybrid Search with Temporal Filtering
 
 Pure semantic search misses queries like "what did I do in 2023" because embeddings don't capture temporal specificity well. The hybrid approach:
 
@@ -222,7 +235,7 @@ Pure semantic search misses queries like "what did I do in 2023" because embeddi
 - **Temporal filter**: `start_year <= queryYear AND (end_year IS NULL OR end_year >= queryYear)`
 - **RRF fusion**: Combines both rankings fairly
 
-### 2. Retrieval Gate (Rule-Based + LLM Fallback)
+### 3. Retrieval Gate (Rule-Based + LLM Fallback)
 
 Most queries can be classified without an LLM call:
 - **Rule-based filter**: Regex patterns handle greetings, personal statements, topic questions (~60-70% of queries)
@@ -231,7 +244,7 @@ Most queries can be classified without an LLM call:
 
 This reduces latency and cost while maintaining accuracy.
 
-### 3. Two-Tier Memory Retrieval
+### 4. Two-Tier Memory Retrieval
 
 Pure semantic similarity fails for personalization queries:
 - "Give me a code example" doesn't semantically match "prefers TypeScript"
@@ -243,13 +256,13 @@ Solution: separate profile retrieval from contextual retrieval:
 
 This ensures user preferences are always available for generation tasks without relying on embedding similarity.
 
-### 4. Off-Topic Handling
+### 5. Off-Topic Handling
 
 Off-topic queries (stock tips, medical advice) skip retrieval entirely and get a clean redirect: "I'm a study assistant—happy to help with learning or organizing your notes."
 
 No mention of "I didn't find relevant documents" because that's confusing for genuinely off-topic questions.
 
-### 5. Session Summary Persistence
+### 6. Session Summary Persistence
 
 When a session goes stale (12+ hours inactive), the accumulated session summary is stored as a long-term memory. This captures:
 - Decisions made during the session
@@ -258,14 +271,14 @@ When a session goes stale (12+ hours inactive), the accumulated session summary 
 
 Even after the Redis session expires, this knowledge persists.
 
-### 6. U-Shape Context Distribution
+### 7. U-Shape Context Distribution
 
 Based on "Lost in the Middle" research showing LLMs attend poorly to middle content:
 - Most relevant → front (high attention)
 - Second most relevant → back (high attention)
 - Least relevant → middle (low attention)
 
-### 7. Adaptive Model Selection
+### 8. Adaptive Model Selection
 
 The response generation step dynamically chooses between Haiku (fast/cheap) and Sonnet (capable/expensive) based on retrieval confidence:
 
@@ -277,11 +290,11 @@ The response generation step dynamically chooses between Haiku (fast/cheap) and 
 
 This reduces cost and latency for ~70% of queries while preserving quality for complex cases.
 
-### 8. Document Title Citations
+### 9. Document Title Citations
 
 Sources cite document titles (e.g., `[Source: Resume.pdf]`) instead of opaque chunk indices, making responses more useful.
 
-### 9. Authentication with Clerk
+### 10. Authentication with Clerk
 
 Authentication is handled by Clerk, a managed auth service. This was chosen over building custom auth because:
 - Not the focus of this project (learning agent architecture, not auth)

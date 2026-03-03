@@ -4,6 +4,7 @@ import { RedisSessionStore } from '../stores/RedisSessionStore';
 import { RedisCheckpointer } from '../memory/RedisCheckpointer';
 import type { AgentTrace } from '../schemas/types';
 import crypto from 'crypto';
+import { TEST_USER_ID } from './fixtures/testDocuments';
 
 /**
  * Smoke Tests - Minimal end-to-end tests to verify agent flow is wired correctly.
@@ -33,6 +34,7 @@ async function runAgent(query: string): Promise<{
     {
       messages: [userMessage],
       userQuery: query,
+      userId: TEST_USER_ID,
     },
     { configurable: { thread_id: sessionId } }
   );

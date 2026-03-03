@@ -166,7 +166,7 @@ async function initialize() {
 }
 
 // Helper to get formatted response from the agent
-async function getFormattedAnswerToUserinput(userQuery: string, sessionId: string) {
+async function getFormattedAnswerToUserinput(userQuery: string, sessionId: string, userId: string) {
   const userMessage = {
     id: crypto.randomUUID(),
     role: 'user',
@@ -178,6 +178,7 @@ async function getFormattedAnswerToUserinput(userQuery: string, sessionId: strin
     {
       messages: [userMessage],
       userQuery: userQuery,
+      userId,
     },
     { configurable: { thread_id: sessionId } }
   );
@@ -205,7 +206,7 @@ app.post('/api/chat', requireAuth(), async (req, res) => {
     const userId = await getOrCreateUser(clerkUserId);
     const sessionId = await getUserSession(userId);
 
-    const result = await getFormattedAnswerToUserinput(message, sessionId);
+    const result = await getFormattedAnswerToUserinput(message, sessionId, userId);
     const trace = result?.trace as AgentTrace | undefined;
 
     // Log trace summary
