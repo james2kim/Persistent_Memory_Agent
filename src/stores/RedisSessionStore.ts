@@ -167,8 +167,19 @@ export class RedisSessionStoreClass {
   }
 }
 
+function getRedisUrl(): string {
+  const url = process.env.REDIS_URL;
+  if (!url) {
+    throw new Error('Missing required environment variable: REDIS_URL');
+  }
+  if (process.env.NODE_ENV === 'production' && !url.startsWith('rediss://')) {
+    console.warn('[RedisSessionStore] WARNING: Using unencrypted Redis connection in production. Use rediss:// for TLS.');
+  }
+  return url;
+}
+
 export const RedisSessionStore = new RedisSessionStoreClass({
-  redisUrl: process.env.REDIS_URL ?? '',
+  redisUrl: getRedisUrl(),
   ttl: 86400,
   keyPrefix: 'session:',
 });

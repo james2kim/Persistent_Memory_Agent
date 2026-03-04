@@ -8,7 +8,11 @@ export class EmbeddingService {
   private model: string;
 
   constructor() {
-    this.client = new VoyageAIClient({ apiKey: process.env.VOYAGE_API_KEY ?? '' });
+    const apiKey = process.env.VOYAGE_API_KEY;
+    if (!apiKey) {
+      throw new Error('Missing required environment variable: VOYAGE_API_KEY');
+    }
+    this.client = new VoyageAIClient({ apiKey });
     this.model = 'voyage-3.5-lite';
   }
   normalizeVector(vec: number[]): number[] {
