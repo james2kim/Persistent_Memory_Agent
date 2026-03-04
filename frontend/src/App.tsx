@@ -19,7 +19,10 @@ function App() {
   return (
     <>
       <header>
-        <h1>Study Assistant Agent</h1>
+        <div className="header-logo">
+          <img src="/logo.png" alt="Anchor logo" />
+          <h1>Anchor</h1>
+        </div>
         <div className="header-actions">
           <SignedIn>
             <UserButton />
