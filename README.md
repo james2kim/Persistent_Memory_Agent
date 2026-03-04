@@ -1,4 +1,4 @@
-# Persistent Memory Study Agent
+# Anchor
 
 A conversational AI study assistant with persistent memory, document RAG, and intelligent retrieval. Built with LangGraph, React, PostgreSQL (pgvector), and Redis.
 
@@ -68,11 +68,11 @@ A conversational AI study assistant with persistent memory, document RAG, and in
 
 Session-scoped memory with 24-hour TTL:
 
-| Key Pattern | Purpose |
-|-------------|---------|
-| `session:<id>` | Session state (messages, summary, taskState) |
+| Key Pattern                     | Purpose                                      |
+| ------------------------------- | -------------------------------------------- |
+| `session:<id>`                  | Session state (messages, summary, taskState) |
 | `checkpoint:<thread_id>:latest` | LangGraph checkpoint for workflow resumption |
-| `user:<id>:active_session` | Maps user to their active session |
+| `user:<id>:active_session`      | Maps user to their active session            |
 
 **Stale Session Archival**: When a session is inactive for 12+ hours but accessed again, the session summary is persisted to long-term memory before continuing. This ensures important context survives session expiration.
 
@@ -110,10 +110,12 @@ Permanent storage for extracted knowledge and documents:
 ## Workflow Nodes
 
 ### 1. retrievalGate
+
 Routes queries based on rule-based classification + LLM fallback + deterministic policy.
 
 **Rule-Based Classification** (instant, free):
 Handles 60-70% of queries without LLM calls:
+
 - Greetings/thanks → `conversational`
 - Personal statements ("I am/like/prefer...") → `personal`
 - Personal questions ("my goal", "what did I say") → `personal`
@@ -121,16 +123,19 @@ Handles 60-70% of queries without LLM calls:
 - Lifestyle advice ("should I nap?") → `off_topic`
 
 **LLM Assessment** (Haiku - for ambiguous cases):
+
 - `queryType`: personal | study_content | general_knowledge | conversational | off_topic | unclear
 - `referencesPersonalContext`: boolean
 
 **Policy** (deterministic):
+
 - `conversational` or `off_topic` → skip all retrieval
 - `study_content` → search documents + memories (for personalization)
 - `personal` → search documents + memories with full budget
 - `unclear` → request clarification
 
 ### 2. retrieveMemoriesAndChunks
+
 Executes hybrid search based on gate decision.
 
 **Two-Tier Memory Retrieval:**
@@ -139,12 +144,13 @@ Profile memories (preferences, facts) are always relevant for personalization bu
 1. **Tier 1 - Profile memories**: Fetch preferences + facts by confidence (no embedding needed)
 2. **Tier 2 - Contextual memories**: Similarity search for goals, decisions, summaries
 
-| Budget | Profile | Contextual | Total |
-|--------|---------|------------|-------|
-| Full   | 3       | 2          | 5     |
-| Minimal| 2       | 0          | 2     |
+| Budget  | Profile | Contextual | Total |
+| ------- | ------- | ---------- | ----- |
+| Full    | 3       | 2          | 5     |
+| Minimal | 2       | 0          | 2     |
 
 **Hybrid Document Search Pipeline:**
+
 1. Extract temporal year from query (e.g., "what did I do in 2023" → 2023)
 2. Run in parallel:
    - **Embedding search**: pgvector cosine similarity with optional temporal filter
@@ -154,9 +160,11 @@ Profile memories (preferences, facts) are always relevant for personalization bu
 4. Deduplicate and return top K chunks
 
 ### 3. injectContext
+
 Builds the context block and generates the response.
 
 **U-Shape Distribution** (based on "Lost in the Middle" research):
+
 - LLMs attend most to beginning and end of context
 - Most relevant items placed at front and back
 - Least relevant items buried in the middle
@@ -167,6 +175,7 @@ Output (U-shape):      [1, 3, 5, 6, 4, 2]
 ```
 
 **Context Format:**
+
 ```
 ## User Context
 - [goal] Complete the study plan by Friday
@@ -181,9 +190,11 @@ Cellular respiration is the process...
 ```
 
 ### 4. extractAndStoreKnowledge
+
 Background extraction of knowledge from the conversation (runs async, doesn't block response).
 
 **Knowledge Extraction:**
+
 - Classifies input as `study_material`, `personal_memory`, or `ephemeral`
 - Study material → ingested as document chunks with embeddings
 - Personal memory → stored with type classification:
@@ -196,10 +207,10 @@ Background extraction of knowledge from the conversation (runs async, doesn't bl
 **Message Summarization (Background):**
 Prevents unbounded context growth while preserving important information.
 
-| Trigger | Action |
-|---------|--------|
+| Trigger           | Action                             |
+| ----------------- | ---------------------------------- |
 | Messages reach 15 | Summarize oldest 10, keep newest 5 |
-| Result | Messages oscillate between 5-15 |
+| Result            | Messages oscillate between 5-15    |
 
 ```
 Before: [m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15]
@@ -210,6 +221,7 @@ After:  [summary] + [m11, m12, m13, m14, m15]
 The summary is appended to the session's running summary, preserving context across pruning cycles.
 
 ### 5. clarificationResponse
+
 Handles ambiguous queries by asking for clarification.
 
 ## Key Architecture Decisions
@@ -218,12 +230,12 @@ Handles ambiguous queries by asking for clarification.
 
 Similarity search on the `chunks.embedding` column uses an HNSW (Hierarchical Navigable Small World) index instead of sequential scan. HNSW builds a multi-layered graph over the vectors — top layers have sparse, long-range connections for coarse navigation, bottom layers have dense, short-range connections for precise lookup. Search traverses top-down in O(log n) hops rather than computing distance against every row (O(n)).
 
-| Parameter | Value | Effect |
-|-----------|-------|--------|
-| `m` | 16 | Max connections per node. Higher = better recall, more memory |
-| `ef_construction` | 64 | Build-time candidate list. Higher = better graph quality, slower builds |
-| `ef_search` | 40 (pgvector default) | Query-time candidate list. Tunable per-query via `SET hnsw.ef_search` |
-| Operator class | `vector_cosine_ops` | Matches the `<=>` cosine distance operator used in queries |
+| Parameter         | Value                 | Effect                                                                  |
+| ----------------- | --------------------- | ----------------------------------------------------------------------- |
+| `m`               | 16                    | Max connections per node. Higher = better recall, more memory           |
+| `ef_construction` | 64                    | Build-time candidate list. Higher = better graph quality, slower builds |
+| `ef_search`       | 40 (pgvector default) | Query-time candidate list. Tunable per-query via `SET hnsw.ef_search`   |
+| Operator class    | `vector_cosine_ops`   | Matches the `<=>` cosine distance operator used in queries              |
 
 Tradeoff: ~99%+ recall vs exact search, which is negligible — chunking strategy and embedding quality are the actual retrieval bottlenecks.
 
@@ -239,6 +251,7 @@ Pure semantic search misses queries like "what did I do in 2023" because embeddi
 ### 3. Retrieval Gate (Rule-Based + LLM Fallback)
 
 Most queries can be classified without an LLM call:
+
 - **Rule-based filter**: Regex patterns handle greetings, personal statements, topic questions (~60-70% of queries)
 - **LLM fallback**: Haiku handles ambiguous cases that don't match patterns
 - **Deterministic policy**: Code decides retrieval strategy based on classification
@@ -248,10 +261,12 @@ This reduces latency and cost while maintaining accuracy.
 ### 4. Two-Tier Memory Retrieval
 
 Pure semantic similarity fails for personalization queries:
+
 - "Give me a code example" doesn't semantically match "prefers TypeScript"
 - But the TypeScript preference is essential for good code generation
 
 Solution: separate profile retrieval from contextual retrieval:
+
 - **Profile memories** (preferences, facts): Always fetched by confidence, no embedding needed
 - **Contextual memories** (goals, decisions): Fetched by semantic similarity
 
@@ -266,6 +281,7 @@ No mention of "I didn't find relevant documents" because that's confusing for ge
 ### 6. Session Summary Persistence
 
 When a session goes stale (12+ hours inactive), the accumulated session summary is stored as a long-term memory. This captures:
+
 - Decisions made during the session
 - Goals established
 - Important context
@@ -275,6 +291,7 @@ Even after the Redis session expires, this knowledge persists.
 ### 7. U-Shape Context Distribution
 
 Based on "Lost in the Middle" research showing LLMs attend poorly to middle content:
+
 - Most relevant → front (high attention)
 - Second most relevant → back (high attention)
 - Least relevant → middle (low attention)
@@ -283,10 +300,10 @@ Based on "Lost in the Middle" research showing LLMs attend poorly to middle cont
 
 The response generation step dynamically chooses between Haiku (fast/cheap) and Sonnet (capable/expensive) based on retrieval confidence:
 
-| Scenario | Model | Rationale |
-|----------|-------|-----------|
-| No context needed | Haiku | Conversational queries don't need heavy reasoning |
-| Good retrieval (≥2 chunks, distance ≤0.6) | Haiku | Synthesizing from strong sources is straightforward |
+| Scenario                                     | Model  | Rationale                                                   |
+| -------------------------------------------- | ------ | ----------------------------------------------------------- |
+| No context needed                            | Haiku  | Conversational queries don't need heavy reasoning           |
+| Good retrieval (≥2 chunks, distance ≤0.6)    | Haiku  | Synthesizing from strong sources is straightforward         |
 | Weak retrieval (few chunks or high distance) | Sonnet | Better at reasoning with sparse info, admitting uncertainty |
 
 This reduces cost and latency for ~70% of queries while preserving quality for complex cases.
@@ -304,6 +321,7 @@ Three layers protect against transient external API failures:
 **Retry with Exponential Backoff**: All LLM (Anthropic) and embedding (VoyageAI) calls are wrapped in a generic `withRetry` utility. On transient failures (429, 5xx, network errors), requests retry up to 3 times with exponential backoff and jitter (~1s, ~2s, ~4s). Auth errors (401/403) and bad requests (400) fail immediately.
 
 **Embedding Fallback**: If the embedding API fails even after retries, the retrieval pipeline degrades gracefully instead of returning empty results:
+
 - Document search falls back to keyword-only (PostgreSQL full-text search)
 - Profile memories (preferences, facts) are still retrieved (no embedding needed)
 - Contextual memories (goals, decisions) are skipped since they require similarity search
@@ -312,11 +330,13 @@ Three layers protect against transient external API failures:
 ### 11. Authentication with Clerk
 
 Authentication is handled by Clerk, a managed auth service. This was chosen over building custom auth because:
+
 - Not the focus of this project (learning agent architecture, not auth)
 - Production-ready security out of the box
 - Simple integration with React and Express
 
 **Authentication Flow:**
+
 1. User signs in via Clerk modal (supports email, OAuth providers)
 2. Frontend passes JWT token with each API request via `Authorization: Bearer <token>`
 3. Backend verifies token via `requireAuth()` middleware from `@clerk/express`
@@ -419,6 +439,7 @@ cp .env.example .env.local
 ```
 
 **Required environment variables (.env.local):**
+
 ```
 ANTHROPIC_API_KEY=sk-ant-...
 VOYAGE_API_KEY=pa-...
@@ -431,6 +452,7 @@ CLERK_SECRET_KEY=sk_test_...
 ```
 
 **Frontend environment variables (frontend/.env.local):**
+
 ```
 VITE_CLERK_PUBLISHABLE_KEY=pk_test_...
 ```
@@ -478,11 +500,13 @@ npm run frontend
 ## API Endpoints
 
 All endpoints require authentication via Clerk. Include the JWT token in the `Authorization` header:
+
 ```
 Authorization: Bearer <clerk_jwt_token>
 ```
 
 ### POST /api/chat
+
 Send a message and get a response.
 
 ```json
@@ -491,6 +515,7 @@ Response: { "response": "Based on your notes...", "sessionId": "..." }
 ```
 
 ### POST /api/upload
+
 Upload a document for ingestion.
 
 ```
@@ -499,6 +524,7 @@ Response: { "documentId": "...", "chunkCount": 15 }
 ```
 
 ### GET /api/session
+
 Get current session state.
 
 ```json
@@ -508,6 +534,7 @@ Response: { "sessionId": "...", "messages": [...], "summary": "..." }
 ## Inspecting State
 
 ### Redis
+
 ```bash
 # List all keys
 redis-cli KEYS "*"
@@ -520,6 +547,7 @@ redis-cli MONITOR
 ```
 
 ### PostgreSQL
+
 ```bash
 # View memories
 psql -d study_agent -c "SELECT id, type, confidence, substring(content, 1, 50) FROM memories;"
@@ -533,13 +561,13 @@ psql -d study_agent -c "SELECT chunk_index, start_year, end_year, substring(cont
 
 ## Configuration
 
-| Constant | Location | Default | Description |
-|----------|----------|---------|-------------|
-| `MAX_MESSAGES` | `constants.ts` | 15 | Triggers summarization (oldest 10 summarized, newest 5 kept) |
-| `STALE_HOURS` | `RedisSessionStore.ts` | 12 | Hours before session summary archival |
-| `TTL` | `RedisSessionStore.ts` | 86400 | Session expiration (24 hours) |
-| `SIMILARITY_THRESHOLD` | `extractKnowledge.ts` | 0.9 | Memory deduplication threshold |
-| `RRF_K` | `DocumentStore.ts` | 60 | RRF fusion constant |
+| Constant               | Location               | Default | Description                                                  |
+| ---------------------- | ---------------------- | ------- | ------------------------------------------------------------ |
+| `MAX_MESSAGES`         | `constants.ts`         | 15      | Triggers summarization (oldest 10 summarized, newest 5 kept) |
+| `STALE_HOURS`          | `RedisSessionStore.ts` | 12      | Hours before session summary archival                        |
+| `TTL`                  | `RedisSessionStore.ts` | 86400   | Session expiration (24 hours)                                |
+| `SIMILARITY_THRESHOLD` | `extractKnowledge.ts`  | 0.9     | Memory deduplication threshold                               |
+| `RRF_K`                | `DocumentStore.ts`     | 60      | RRF fusion constant                                          |
 
 ## Supported File Types
 
@@ -567,22 +595,22 @@ The retrieval pipeline is tested with a dedicated evaluation suite that measures
 
 ### Metrics
 
-| Metric | Description | Threshold |
-|--------|-------------|-----------|
-| **MRR** | Mean Reciprocal Rank — average of 1/rank of first relevant result | ≥ 0.65 |
-| **Recall@5** | Fraction of relevant docs appearing in top 5 results | ≥ 0.65 |
-| **Disambiguation** | Correct doc ranks above keyword-similar-but-wrong doc | ≥ 0.70 |
+| Metric             | Description                                                       | Threshold |
+| ------------------ | ----------------------------------------------------------------- | --------- |
+| **MRR**            | Mean Reciprocal Rank — average of 1/rank of first relevant result | ≥ 0.65    |
+| **Recall@5**       | Fraction of relevant docs appearing in top 5 results              | ≥ 0.65    |
+| **Disambiguation** | Correct doc ranks above keyword-similar-but-wrong doc             | ≥ 0.70    |
 
 ### Test Categories
 
-| Category | What it tests |
-|----------|---------------|
-| Temporal | Date range filtering ("what did I do in 2023") |
-| Semantic | Meaning-based retrieval without exact keywords |
-| Keyword | Direct term matching ("ClickHouse migration") |
-| Study content | Document content retrieval |
+| Category       | What it tests                                                                                                  |
+| -------------- | -------------------------------------------------------------------------------------------------------------- |
+| Temporal       | Date range filtering ("what did I do in 2023")                                                                 |
+| Semantic       | Meaning-based retrieval without exact keywords                                                                 |
+| Keyword        | Direct term matching ("ClickHouse migration")                                                                  |
+| Study content  | Document content retrieval                                                                                     |
 | Disambiguation | Correct doc outranks keyword-similar doc (e.g., "axiom in math" ranks math notes above "Axiom" company resume) |
-| Edge cases | Typos, long queries, single-word queries |
+| Edge cases     | Typos, long queries, single-word queries                                                                       |
 
 ### Running Tests
 
@@ -610,12 +638,12 @@ interface AgentTrace {
   queryId: string;
   query: string;
   startTime: number;
-  spans: TraceSpan[];      // Append-only, each node adds one
-  outcome: TraceOutcome;   // Set once at the end
+  spans: TraceSpan[]; // Append-only, each node adds one
+  outcome: TraceOutcome; // Set once at the end
 }
 
 interface TraceSpan {
-  node: string;            // 'retrievalGate', 'hybridSearch', etc.
+  node: string; // 'retrievalGate', 'hybridSearch', etc.
   startTime: number;
   durationMs: number;
   meta: Record<string, string | number | boolean | null>;
@@ -631,26 +659,27 @@ interface TraceOutcome {
 
 ### What Each Node Captures
 
-| Node | Metadata |
-|------|----------|
-| `retrievalGate` | queryType, wasRewritten, shouldRetrieveDocuments, shouldRetrieveMemories |
+| Node                        | Metadata                                                                           |
+| --------------------------- | ---------------------------------------------------------------------------------- |
+| `retrievalGate`             | queryType, wasRewritten, shouldRetrieveDocuments, shouldRetrieveMemories           |
 | `retrieveMemoriesAndChunks` | profileMemories, contextualMemories, chunksRetrieved (+ hybrid search diagnostics) |
-| `injectContext` | documentsUsed, memoriesUsed, contextTokens, responseLength |
-| `extractAndStoreKnowledge` | contentType, memoriesAdded, studyMaterialIngested |
-| `clarificationResponse` | responseLength |
+| `injectContext`             | documentsUsed, memoriesUsed, contextTokens, responseLength                         |
+| `extractAndStoreKnowledge`  | contentType, memoriesAdded, studyMaterialIngested                                  |
+| `clarificationResponse`     | responseLength                                                                     |
 
 ### Retrieval Diagnostics
 
 The `retrieveMemoriesAndChunks` node captures detailed pipeline diagnostics to pinpoint where retrieval quality degrades:
 
-| Stage | Metrics | What it tells you |
-|-------|---------|-------------------|
+| Stage             | Metrics                                                                                           | What it tells you                                       |
+| ----------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
 | **Hybrid Search** | `embeddingCandidates`, `keywordCandidates`, `fusionOverlap`, `fusedCount`, `topEmbeddingDistance` | How many chunks each search found, overlap between them |
-| **Pipeline** | `afterRelevanceFilter`, `afterDedup`, `afterBudget` | Chunk counts after each filtering stage |
-| **Quality** | `topChunkDistance`, `scoreSpread`, `uniqueDocuments` | Confidence signals for retrieval quality |
-| **Temporal** | `temporalFilterApplied`, `queryYear` | Whether date filtering was used |
+| **Pipeline**      | `afterRelevanceFilter`, `afterDedup`, `afterBudget`                                               | Chunk counts after each filtering stage                 |
+| **Quality**       | `topChunkDistance`, `scoreSpread`, `uniqueDocuments`                                              | Confidence signals for retrieval quality                |
+| **Temporal**      | `temporalFilterApplied`, `queryYear`                                                              | Whether date filtering was used                         |
 
 **Example trace for debugging:**
+
 ```
 embeddingCandidates: 40  →  keywordCandidates: 12  →  fusedCount: 35
     ↓
@@ -658,6 +687,7 @@ afterRelevanceFilter: 28  →  afterDedup: 22  →  afterBudget: 8
 ```
 
 **Interpreting the diagnostics:**
+
 - High `embeddingCandidates` but low `afterRelevanceFilter` → relevance rules too strict
 - High `afterDedup` but low `afterBudget` → budget constraints cutting relevant chunks
 - Large `scoreSpread` → retrieved chunks have varying quality
@@ -674,20 +704,21 @@ afterRelevanceFilter: 28  →  afterDedup: 22  →  afterBudget: 8
 
 Traces are for observability, not a secondary memory system. Automatic pruning prevents bloat:
 
-| Limit | Value | Purpose |
-|-------|-------|---------|
-| `MAX_RUNS_PER_SESSION` | 50 | Cap trace history per session |
-| `MAX_SPANS_PER_RUN` | 100 | Limit events per trace |
-| `MAX_CANDIDATES_PER_RETRIEVAL` | 10 | Limit logged chunk candidates |
-| `MAX_BYTES_PER_RUN` | 100 KB | Hard cap on trace size |
-| `MAX_SNIPPET_LENGTH` | 100 chars | Truncate content in candidates |
-| `MAX_QUERY_LENGTH` | 500 chars | Truncate long queries |
+| Limit                          | Value     | Purpose                        |
+| ------------------------------ | --------- | ------------------------------ |
+| `MAX_RUNS_PER_SESSION`         | 50        | Cap trace history per session  |
+| `MAX_SPANS_PER_RUN`            | 100       | Limit events per trace         |
+| `MAX_CANDIDATES_PER_RETRIEVAL` | 10        | Limit logged chunk candidates  |
+| `MAX_BYTES_PER_RUN`            | 100 KB    | Hard cap on trace size         |
+| `MAX_SNIPPET_LENGTH`           | 100 chars | Truncate content in candidates |
+| `MAX_QUERY_LENGTH`             | 500 chars | Truncate long queries          |
 
 **When pruning happens:**
 
 Pruning occurs at the **end of the workflow** in terminal nodes (`extractAndStoreKnowledge` and `clarificationResponse`), after the outcome is set but before the trace is returned. This ensures the complete trace is captured before pruning.
 
 **What gets pruned:**
+
 - Raw chunk content → replaced with short snippets
 - Full embeddings → dropped entirely
 - Large metadata values → truncated to 200 chars
@@ -701,12 +732,13 @@ Instead of storing full chunk data, traces store lightweight summaries:
 type CandidateSummary = {
   id: string;
   documentId: string;
-  score: number;      // distance or confidence
-  snippet: string;    // first 100 chars
+  score: number; // distance or confidence
+  snippet: string; // first 100 chars
 };
 ```
 
 **Usage:**
+
 ```typescript
 import { TraceUtil, TRACE_LIMITS } from './util/TraceUtil';
 
@@ -725,6 +757,7 @@ const prunedHistory = TraceUtil.pruneSessionTraces(traces);
 LangGraph automatically traces all workflow runs to LangSmith when configured.
 
 **Setup:**
+
 ```bash
 # Add to .env.local
 LANGCHAIN_TRACING_V2=true
@@ -781,6 +814,7 @@ curl -X POST http://localhost:3000/api/chat \
 ```
 
 **Response:**
+
 ```json
 {
   "trace": {
@@ -840,10 +874,10 @@ npm run test:watch
 
 Minimal end-to-end tests to verify the agent pipeline is wired correctly.
 
-| Test | Path | Verifies |
-|------|------|----------|
-| Happy path | Gate → Retrieval → Context → Extract | Full pipeline executes, success outcome |
-| Alternate path | Gate → Context (skip retrieval) | Conversational queries skip retrieval correctly |
+| Test           | Path                                 | Verifies                                        |
+| -------------- | ------------------------------------ | ----------------------------------------------- |
+| Happy path     | Gate → Retrieval → Context → Extract | Full pipeline executes, success outcome         |
+| Alternate path | Gate → Context (skip retrieval)      | Conversational queries skip retrieval correctly |
 
 These are NOT quality evaluations — they just verify the pipeline doesn't break.
 
@@ -853,12 +887,12 @@ Unit tests for pure utility functions run fast (~200ms) with no external depende
 
 **`documentUtil.test.ts`** - 28 tests covering:
 
-| Function | Tests |
-|----------|-------|
-| `applyBudget` | `maxChunks`, `maxPerDoc`, `maxContextTokens`, `maxChunkTokens`, combined constraints, empty input |
-| `estimateTokens` | ~4 chars/token heuristic, empty string, rounding, whitespace handling |
-| `cosineSimilarity` | Identical vectors (1.0), orthogonal (0.0), opposite (-1.0), symmetry, high-dimensional, zero vectors |
-| `removeDuplicateChunks` | High similarity removal, threshold behavior, missing embeddings |
+| Function                | Tests                                                                                                |
+| ----------------------- | ---------------------------------------------------------------------------------------------------- |
+| `applyBudget`           | `maxChunks`, `maxPerDoc`, `maxContextTokens`, `maxChunkTokens`, combined constraints, empty input    |
+| `estimateTokens`        | ~4 chars/token heuristic, empty string, rounding, whitespace handling                                |
+| `cosineSimilarity`      | Identical vectors (1.0), orthogonal (0.0), opposite (-1.0), symmetry, high-dimensional, zero vectors |
+| `removeDuplicateChunks` | High similarity removal, threshold behavior, missing embeddings                                      |
 
 ### Integration Tests
 
@@ -866,15 +900,16 @@ Integration tests run the full agent pipeline and assert on trace outcomes. Thes
 
 **What the tests verify:**
 
-| Test Category | Assertions |
-|---------------|------------|
-| Trace Outcomes | `success` for valid queries, `clarified` for ambiguous ones |
-| Retrieval Pipeline | Documents retrieved when expected, diagnostics captured |
-| Temporal Filtering | `queryYear` extracted and applied correctly |
-| Performance | Total duration < 30s, no span > 15s |
-| Error Resilience | Minimal/long queries handled gracefully |
+| Test Category      | Assertions                                                  |
+| ------------------ | ----------------------------------------------------------- |
+| Trace Outcomes     | `success` for valid queries, `clarified` for ambiguous ones |
+| Retrieval Pipeline | Documents retrieved when expected, diagnostics captured     |
+| Temporal Filtering | `queryYear` extracted and applied correctly                 |
+| Performance        | Total duration < 30s, no span > 15s                         |
+| Error Resilience   | Minimal/long queries handled gracefully                     |
 
 **Example test:**
+
 ```typescript
 it('should retrieve documents for study content queries', async () => {
   const { trace } = await runAgent('What does my resume say?');
@@ -950,29 +985,30 @@ npx tsx src/evals/runExperiment.ts
 
 ### Test Categories
 
-| Category | Expected Behavior | What it tests |
-|----------|------------------|---------------|
-| `study_content` | ANSWER | Questions about documents/notes |
-| `personal` | ANSWER | User-specific info (goals, history) |
-| `temporal_containment` | ANSWER | Time-bound queries ("What did I do in 2023?") |
-| `off_topic` | REFUSE | Lifestyle/opinion questions (stocks, fashion) |
-| `unclear` | CLARIFY | Vague/ambiguous queries |
+| Category               | Expected Behavior | What it tests                                 |
+| ---------------------- | ----------------- | --------------------------------------------- |
+| `study_content`        | ANSWER            | Questions about documents/notes               |
+| `personal`             | ANSWER            | User-specific info (goals, history)           |
+| `temporal_containment` | ANSWER            | Time-bound queries ("What did I do in 2023?") |
+| `off_topic`            | REFUSE            | Lifestyle/opinion questions (stocks, fashion) |
+| `unclear`              | CLARIFY           | Vague/ambiguous queries                       |
 
 ### Evaluators
 
 Each evaluator returns a score (0-1), weight, and critical flag:
 
-| Evaluator | Weight | Critical | What it checks |
-|-----------|--------|----------|----------------|
-| `behavior` | 3.0 | Yes | ANSWER/REFUSE/CLARIFY matches expected |
-| `routing` | 2.0 | No | Gate classified query correctly |
-| `retrieval` | 1.0 | No | Retrieved when expected, skipped when not |
-| `budget` | 1.0 | No | Latency and token usage within thresholds |
-| `contains_any` | 1.5 | No | Response contains expected keywords |
-| `must_cover` | 1.5 | No | Response covers expected topics |
-| `amount` | 2.0 | No | Numeric values match expected |
+| Evaluator      | Weight | Critical | What it checks                            |
+| -------------- | ------ | -------- | ----------------------------------------- |
+| `behavior`     | 3.0    | Yes      | ANSWER/REFUSE/CLARIFY matches expected    |
+| `routing`      | 2.0    | No       | Gate classified query correctly           |
+| `retrieval`    | 1.0    | No       | Retrieved when expected, skipped when not |
+| `budget`       | 1.0    | No       | Latency and token usage within thresholds |
+| `contains_any` | 1.5    | No       | Response contains expected keywords       |
+| `must_cover`   | 1.5    | No       | Response covers expected topics           |
+| `amount`       | 2.0    | No       | Numeric values match expected             |
 
 **Scoring:**
+
 - Critical evaluators must pass (score = 1.0) or entire test fails
 - Non-critical evaluators contribute to weighted average
 - Pass threshold: weighted score ≥ 70%
@@ -992,13 +1028,13 @@ The evaluator uses **trace-first** detection with text fallback:
 
 Test documents are defined in `src/evals/fixtures/evalDocuments.ts` with fake data:
 
-| Document | Content |
-|----------|---------|
-| User Profile | Fake career info, severance ($42,500), work history |
-| Lost in Middle | Summary of position effects in LLM context |
-| ReAct Paper | Reasoning + acting framework explanation |
-| React Docs | JavaScript library overview |
-| Hair Loss | Finasteride vs dutasteride comparison |
+| Document       | Content                                             |
+| -------------- | --------------------------------------------------- |
+| User Profile   | Fake career info, severance ($42,500), work history |
+| Lost in Middle | Summary of position effects in LLM context          |
+| ReAct Paper    | Reasoning + acting framework explanation            |
+| React Docs     | JavaScript library overview                         |
+| Hair Loss      | Finasteride vs dutasteride comparison               |
 
 The seed script ingests these under a dedicated `EVAL_USER_ID` so tests run against consistent data regardless of your personal documents.
 
@@ -1024,11 +1060,11 @@ The seed script ingests these under a dedicated `EVAL_USER_ID` so tests run agai
 
 ### Files
 
-| File | Purpose |
-|------|---------|
-| `src/evals/dataset.ts` | Test cases with expected behaviors |
-| `src/evals/evaluators.ts` | Scoring functions (behavior, routing, content) |
-| `src/evals/runLocal.ts` | Local test runner (no external deps) |
-| `src/evals/runExperiment.ts` | LangSmith experiment runner |
-| `src/evals/seed.ts` | Seeds fixture documents into database |
-| `src/evals/fixtures/evalDocuments.ts` | Fake test documents |
+| File                                  | Purpose                                        |
+| ------------------------------------- | ---------------------------------------------- |
+| `src/evals/dataset.ts`                | Test cases with expected behaviors             |
+| `src/evals/evaluators.ts`             | Scoring functions (behavior, routing, content) |
+| `src/evals/runLocal.ts`               | Local test runner (no external deps)           |
+| `src/evals/runExperiment.ts`          | LangSmith experiment runner                    |
+| `src/evals/seed.ts`                   | Seeds fixture documents into database          |
+| `src/evals/fixtures/evalDocuments.ts` | Fake test documents                            |
