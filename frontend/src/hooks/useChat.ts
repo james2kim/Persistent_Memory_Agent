@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@clerk/clerk-react';
-import { sendMessage, uploadFileSmart, getSession, parseSessionMessage, type RateLimitInfo } from '../api/client';
+import { sendMessage, uploadFileSmart, pollJobStatus, getSession, parseSessionMessage, type RateLimitInfo } from '../api/client';
 
 export interface Message {
   id: string;
@@ -76,47 +76,62 @@ export function useChat() {
     [addMessage, getToken]
   );
 
-  const handleUpload = useCallback(
-    async (file: File) => {
-      const statusMsg = addMessage('system', `Uploading: ${file.name}...`);
+  const updateMessage = useCallback(
+    (id: string, content: string, loading?: boolean) => {
       setMessages((prev) =>
-        prev.map((m) => (m.id === statusMsg.id ? { ...m, loading: true } : m))
+        prev.map((m) => (m.id === id ? { ...m, content, loading: loading ?? m.loading } : m))
       );
-
-      try {
-        const response = await uploadFileSmart(
-          file,
-          getToken,
-          undefined,
-          () => {
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === statusMsg.id
-                  ? { ...m, content: `Processing document: ${file.name}...`, loading: true }
-                  : m
-              )
-            );
-          }
-        );
-
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === statusMsg.id
-              ? { ...m, content: `Uploaded "${response.filename}" - ${response.chunkCount} chunks ingested.`, loading: false }
-              : m
-          )
-        );
-      } catch (err) {
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === statusMsg.id
-              ? { ...m, content: err instanceof Error ? err.message : 'Upload failed. Please try again.', loading: false }
-              : m
-          )
-        );
-      }
     },
-    [addMessage, getToken]
+    []
+  );
+
+  const handleUpload = useCallback(
+    (file: File) => {
+      const statusMsg = addMessage('system', `Uploading: ${file.name}...`);
+      updateMessage(statusMsg.id, statusMsg.content, true);
+
+      uploadFileSmart(file, getToken)
+        .then((outcome) => {
+          if (outcome.kind === 'completed') {
+            updateMessage(
+              statusMsg.id,
+              `Uploaded "${outcome.result.filename}" — ${outcome.result.chunkCount} chunks ingested.`,
+              false
+            );
+          } else {
+            updateMessage(statusMsg.id, `Processing document: ${file.name}...`, true);
+
+            pollJobStatus(outcome.jobId, getToken, (status) => {
+              if (status.progress?.stage) {
+                const label = status.progress.stage.replace(/_/g, ' ');
+                updateMessage(statusMsg.id, `Processing "${file.name}": ${label}...`, true);
+              }
+            })
+              .then((result) => {
+                updateMessage(
+                  statusMsg.id,
+                  `Uploaded "${result.filename}" — ${result.chunkCount} chunks ingested.`,
+                  false
+                );
+              })
+              .catch((err) => {
+                updateMessage(
+                  statusMsg.id,
+                  err instanceof Error ? err.message : 'Processing failed. Please try again.',
+                  false
+                );
+              });
+          }
+        })
+        .catch((err) => {
+          updateMessage(
+            statusMsg.id,
+            err instanceof Error ? err.message : 'Upload failed. Please try again.',
+            false
+          );
+        });
+    },
+    [addMessage, updateMessage, getToken]
   );
 
   return {

@@ -1,26 +1,21 @@
-import { useRef, useState } from 'react';
+import { useRef } from 'react';
 
 interface FileUploadProps {
-  onUpload: (file: File) => Promise<void>;
+  onUpload: (file: File) => void;
   disabled: boolean;
 }
 
 export function FileUpload({ onUpload, disabled }: FileUploadProps) {
-  const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleUpload = async () => {
+  const handleUpload = () => {
     const file = fileInputRef.current?.files?.[0];
     if (!file) return;
 
-    setUploading(true);
-    try {
-      await onUpload(file);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
-    } finally {
-      setUploading(false);
+    onUpload(file);
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
     }
   };
 
@@ -31,14 +26,14 @@ export function FileUpload({ onUpload, disabled }: FileUploadProps) {
         ref={fileInputRef}
         type="file"
         accept=".pdf,.docx,.doc,.md,.txt"
-        disabled={disabled || uploading}
+        disabled={disabled}
       />
       <button
         className="secondary"
         onClick={handleUpload}
-        disabled={disabled || uploading}
+        disabled={disabled}
       >
-        {uploading ? 'Uploading...' : 'Upload'}
+        Upload
       </button>
     </div>
   );

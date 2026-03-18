@@ -180,6 +180,6 @@ function getRedisUrl(): string {
 
 export const RedisSessionStore = new RedisSessionStoreClass({
   redisUrl: getRedisUrl(),
-  ttl: 86400,
+  ttl: 604800, // 1 week
   keyPrefix: 'session:',
 });

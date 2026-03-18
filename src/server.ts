@@ -10,14 +10,12 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { clerkMiddleware, getAuth, requireAuth } from '@clerk/express';
 
-import { PDFLoader } from '@langchain/community/document_loaders/fs/pdf';
-import { DocxLoader } from '@langchain/community/document_loaders/fs/docx';
-
 import { RedisSessionStore } from './stores/RedisSessionStore';
 import { RedisCheckpointer } from './memory/RedisCheckpointer';
 import { UserStore } from './stores/UserStore';
 import { buildWorkflow } from './agent/graph';
 import { ingestDocument } from './ingest/ingestDocument';
+import { extractTextFromFile } from './ingest/processGcsFile';
 import { DocumentStore } from './stores/DocumentStore';
 import { db } from './db/knex';
 import { runBackgroundSummarization, runBackgroundExtraction } from './agent/backgroundTasks';
@@ -26,10 +24,9 @@ import { LangSmithUtil } from './util/LangSmithUtil';
 import { TitleExtractor } from './util/TitleExtractor';
 import {
   generateSignedUploadUrl,
-  downloadAsBuffer,
-  deleteFile,
   fileExists,
 } from './util/GcsUtil';
+import { initializeQueues, shutdownQueues, getFileProcessingQueue, getJobStatus } from './queue';
 import type { AgentTrace } from './schemas/types';
 
 // Supported file types
@@ -41,74 +38,6 @@ const SUPPORTED_MIMETYPES = [
   'text/markdown',
   'text/plain',
 ];
-
-// Convert Node.js Buffer to Blob
-function bufferToBlob(buffer: Buffer, type: string): Blob {
-  // Create a Uint8Array view of the buffer to use as BlobPart
-  const uint8Array = new Uint8Array(buffer);
-  return new Blob([uint8Array], { type });
-}
-
-type ExtractedContent = {
-  text: string;
-  pdfTitle?: string; // Title from PDF metadata if available
-};
-
-// Extract text from uploaded file using LangChain loaders
-async function extractTextFromFile(
-  buffer: Buffer,
-  originalname: string,
-  mimetype: string
-): Promise<ExtractedContent> {
-  const ext = path.extname(originalname).toLowerCase();
-
-  // PDF files
-  if (ext === '.pdf' || mimetype === 'application/pdf') {
-    const blob = bufferToBlob(buffer, 'application/pdf');
-    const loader = new PDFLoader(blob, { splitPages: false });
-    const docs = await loader.load();
-    const text = docs.map((doc) => doc.pageContent).join('\n\n');
-
-    // Try to get title from PDF metadata
-    const pdfTitle = docs[0]?.metadata?.pdf?.info?.Title as string | undefined;
-
-    return { text, pdfTitle };
-  }
-
-  // Word documents (.docx)
-  if (
-    ext === '.docx' ||
-    mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-  ) {
-    const blob = bufferToBlob(
-      buffer,
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-    );
-    const loader = new DocxLoader(blob);
-    const docs = await loader.load();
-    return { text: docs.map((doc) => doc.pageContent).join('\n\n') };
-  }
-
-  // Legacy .doc files - try DocxLoader (may not work for all .doc files)
-  if (ext === '.doc' || mimetype === 'application/msword') {
-    const blob = bufferToBlob(buffer, 'application/msword');
-    const loader = new DocxLoader(blob);
-    const docs = await loader.load();
-    return { text: docs.map((doc) => doc.pageContent).join('\n\n') };
-  }
-
-  // Markdown and plain text files
-  if (
-    ext === '.md' ||
-    ext === '.txt' ||
-    mimetype === 'text/markdown' ||
-    mimetype === 'text/plain'
-  ) {
-    return { text: buffer.toString('utf-8') };
-  }
-
-  throw new Error(`Unsupported file type: ${ext || mimetype}`);
-}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -234,6 +163,9 @@ async function getUserSession(userId: string): Promise<string> {
 async function initialize() {
   console.log('Connecting to Redis...');
   await RedisSessionStore.connect();
+
+  console.log('Initializing job queues...');
+  await initializeQueues();
 
   const checkpointer = new RedisCheckpointer(RedisSessionStore);
   agentApp = buildWorkflow(checkpointer);
@@ -511,92 +443,7 @@ app.post('/api/upload/signed-url', requireAuth(), async (req, res) => {
   }
 });
 
-// Shared file processing logic (used by both sync and async paths)
-async function processGcsFile(
-  userId: string,
-  gcsPath: string,
-  filename: string
-): Promise<{ documentId: string; chunkCount: number; filename: string; title: string }> {
-  const buffer = await downloadAsBuffer(gcsPath);
-
-  const ext = path.extname(filename).toLowerCase();
-  const mimeMap: Record<string, string> = {
-    '.pdf': 'application/pdf',
-    '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    '.doc': 'application/msword',
-    '.md': 'text/markdown',
-    '.txt': 'text/plain',
-  };
-  const mimetype = mimeMap[ext] || 'application/octet-stream';
-
-  const { text: textContent, pdfTitle } = await extractTextFromFile(buffer, filename, mimetype);
-
-  if (!textContent || textContent.trim().length === 0) {
-    await deleteFile(gcsPath).catch(() => {});
-    throw new Error('Could not extract text from file. The file may be empty or corrupted.');
-  }
-
-  const extractedTitle = pdfTitle || TitleExtractor.extractTitle(textContent, filename);
-  console.log(`[upload/process] Title: "${extractedTitle}" (from PDF metadata: ${!!pdfTitle})`);
-
-  const result = await ingestDocument(
-    db,
-    { documents: documentStore },
-    {
-      source: filename,
-      title: extractedTitle,
-      text: textContent,
-      metadata: {
-        uploadedAt: new Date().toISOString(),
-        originalName: filename,
-        mimeType: mimetype,
-        fileType: ext,
-      },
-    },
-    userId
-  );
-
-  await deleteFile(gcsPath).catch((err) =>
-    console.error('[upload/process] Failed to delete GCS file:', err)
-  );
-
-  return { documentId: result.documentId, chunkCount: result.chunkCount, filename, title: extractedTitle };
-}
-
-// Background job processing for large file uploads (production only)
-const JOB_TTL = 3600; // 1 hour
-
-async function processFileInBackground(
-  jobId: string,
-  userId: string,
-  gcsPath: string,
-  filename: string
-): Promise<void> {
-  const redis = RedisSessionStore.getClient();
-  const jobKey = `job:${jobId}`;
-
-  try {
-    const result = await processGcsFile(userId, gcsPath, filename);
-    await redis.set(
-      jobKey,
-      JSON.stringify({ status: 'completed', userId, result }),
-      { EX: JOB_TTL }
-    );
-    console.log(`[upload/process] Job ${jobId} completed successfully`);
-  } catch (err) {
-    console.error(`[upload/process] Job ${jobId} failed:`, err);
-    const message = err instanceof Error ? err.message : 'Failed to process upload';
-    await redis.set(
-      jobKey,
-      JSON.stringify({ status: 'failed', userId, error: message }),
-      { EX: JOB_TTL }
-    ).catch(() => {});
-  }
-}
-
-// POST /api/upload/process - Process a file already uploaded to GCS
-// Production: async with polling (avoids Firebase 60s timeout)
-// Development: synchronous (no timeout issue locally)
+// POST /api/upload/process - Process a file already uploaded to GCS via BullMQ queue
 app.post('/api/upload/process', requireAuth(), async (req, res) => {
   try {
     const { userId: clerkUserId } = getAuth(req);
@@ -630,26 +477,22 @@ app.post('/api/upload/process', requireAuth(), async (req, res) => {
       return res.status(404).json({ error: 'File not found in storage. It may have expired.' });
     }
 
-    if (isProduction) {
-      // Async path: return immediately, process in background
-      const jobId = crypto.randomUUID();
-      const redis = RedisSessionStore.getClient();
-      await redis.set(
-        `job:${jobId}`,
-        JSON.stringify({ status: 'processing', userId }),
-        { EX: JOB_TTL }
-      );
+    // Enqueue via BullMQ — unified path for both prod and dev
+    const queue = getFileProcessingQueue();
+    await queue.add(
+      'process-file',
+      {
+        userId,
+        gcsPath,
+        filename,
+        fileId,
+        enqueuedAt: new Date().toISOString(),
+      },
+      { jobId: fileId }
+    );
 
-      processFileInBackground(jobId, userId, gcsPath, filename).catch((err) =>
-        console.error(`[upload/process] Unhandled error in job ${jobId}:`, err)
-      );
-
-      res.json({ jobId, status: 'processing' });
-    } else {
-      // Sync path: process directly and return result (no Firebase timeout locally)
-      const result = await processGcsFile(userId, gcsPath, filename);
-      res.json(result);
-    }
+    console.log(`[upload/process] Enqueued job ${fileId} for ${filename}`);
+    res.json({ jobId: fileId, status: 'queued' });
   } catch (err) {
     console.error('Error in /api/upload/process:', err);
     const message = err instanceof Error ? err.message : 'Failed to process upload';
@@ -657,7 +500,7 @@ app.post('/api/upload/process', requireAuth(), async (req, res) => {
   }
 });
 
-// GET /api/upload/status/:jobId - Check processing job status
+// GET /api/upload/status/:jobId - Check processing job status via BullMQ
 app.get('/api/upload/status/:jobId', requireAuth(), async (req, res) => {
   try {
     const { userId: clerkUserId } = getAuth(req);
@@ -667,28 +510,15 @@ app.get('/api/upload/status/:jobId', requireAuth(), async (req, res) => {
 
     res.set('Cache-Control', 'no-store');
 
-    const { jobId } = req.params;
+    const jobId = req.params.jobId as string;
     const userId = await getOrCreateUser(clerkUserId);
-    const redis = RedisSessionStore.getClient();
 
-    const jobRaw = await redis.get(`job:${jobId}`);
-    if (!jobRaw) {
+    const status = await getJobStatus(jobId, userId);
+    if (!status) {
       return res.status(404).json({ error: 'Job not found or expired' });
     }
 
-    const job = JSON.parse(jobRaw);
-
-    if (job.userId !== userId) {
-      return res.status(403).json({ error: 'Access denied' });
-    }
-
-    if (job.status === 'completed') {
-      return res.json({ status: 'completed', result: job.result });
-    } else if (job.status === 'failed') {
-      return res.json({ status: 'failed', error: job.error });
-    } else {
-      return res.json({ status: 'processing' });
-    }
+    return res.json(status);
   } catch (err) {
     console.error('Error in /api/upload/status:', err);
     res.status(500).json({ error: 'Failed to check job status' });
@@ -850,11 +680,15 @@ async function main() {
 }
 
 // Handle graceful shutdown
-process.on('SIGINT', async () => {
-  console.log('\nShutting down...');
+async function gracefulShutdown(signal: string) {
+  console.log(`\n${signal} received. Shutting down...`);
+  await shutdownQueues();
   await RedisSessionStore.disconnect();
   await db.destroy();
   process.exit(0);
-});
+}
+
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 
 main();

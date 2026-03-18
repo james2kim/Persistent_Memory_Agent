@@ -192,17 +192,25 @@ export function uploadToGcs(
 const POLL_INTERVAL_MS = 3000;
 const POLL_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
 
-interface JobStatusResponse {
-  status: 'processing' | 'completed' | 'failed';
-  result?: UploadResponse;
-  error?: string;
+interface JobStatusProgress {
+  stage: 'downloading' | 'extracting_text' | 'embedding' | 'cleaning_up' | 'completed';
+  detail?: string;
 }
 
-export async function processUploadedFile(
+interface JobStatusResponse {
+  status: 'queued' | 'processing' | 'completed' | 'failed';
+  result?: UploadResponse;
+  error?: string;
+  progress?: JobStatusProgress;
+}
+
+/**
+ * Enqueue a GCS-uploaded file for processing. Returns the jobId immediately.
+ */
+export async function enqueueFileProcessing(
   params: { fileId: string; gcsPath: string; filename: string },
-  getToken: () => Promise<string | null>,
-  onProcessing?: () => void
-): Promise<UploadResponse> {
+  getToken: () => Promise<string | null>
+): Promise<string> {
   const authHeaders = await getAuthHeaders(getToken);
 
   const response = await fetch('/api/upload/process', {
@@ -216,20 +224,22 @@ export async function processUploadedFile(
 
   if (!response.ok) {
     const data = await safeFetchJson(response);
-    throw new Error((data as Record<string, string>).error || 'Failed to process uploaded file');
+    throw new Error((data as Record<string, string>).error || 'Failed to enqueue file processing');
   }
 
-  const data = await safeFetchJson<UploadResponse & { jobId?: string; status?: string }>(response);
+  const data = await safeFetchJson<{ jobId: string }>(response);
+  return data.jobId;
+}
 
-  // Dev mode: backend returns the result directly (synchronous)
-  if (!data.jobId) {
-    return data as UploadResponse;
-  }
-
-  // Production mode: backend returned { jobId, status: 'processing' }, poll for result
-  const { jobId } = data;
-  onProcessing?.();
-
+/**
+ * Poll a queued job until it completes or fails.
+ * Calls onProgress with each status update.
+ */
+export async function pollJobStatus(
+  jobId: string,
+  getToken: () => Promise<string | null>,
+  onProgress?: (status: JobStatusResponse) => void
+): Promise<UploadResponse> {
   const deadline = Date.now() + POLL_TIMEOUT_MS;
 
   while (Date.now() < deadline) {
@@ -241,7 +251,6 @@ export async function processUploadedFile(
         headers: pollHeaders,
       });
 
-      // Auth redirect or non-API response — token probably expired, retry next poll
       if (statusRes.redirected || !statusRes.url.includes('/api/')) {
         continue;
       }
@@ -252,6 +261,7 @@ export async function processUploadedFile(
       }
 
       const job = await safeFetchJson<JobStatusResponse>(statusRes);
+      onProgress?.(job);
 
       if (job.status === 'completed' && job.result) {
         return job.result;
@@ -259,9 +269,8 @@ export async function processUploadedFile(
       if (job.status === 'failed') {
         throw new Error(job.error || 'File processing failed');
       }
-      // status === 'processing' → continue polling
+      // status === 'processing' or 'queued' → continue polling
     } catch (err) {
-      // Auth errors during polling — token will refresh on next iteration
       if (err instanceof Error && err.message.includes('Session expired')) {
         continue;
       }
@@ -272,26 +281,34 @@ export async function processUploadedFile(
   throw new Error('File processing timed out. Please try again.');
 }
 
+export type SmartUploadResult =
+  | { kind: 'completed'; result: UploadResponse }
+  | { kind: 'enqueued'; jobId: string; filename: string };
+
+/**
+ * Upload a file. Returns immediately for queued jobs (large files).
+ * Small files are processed synchronously and return the result directly.
+ */
 export async function uploadFileSmart(
   file: File,
   getToken: () => Promise<string | null>,
-  onProgress?: (percent: number) => void,
-  onProcessing?: () => void
-): Promise<UploadResponse> {
+  onProgress?: (percent: number) => void
+): Promise<SmartUploadResult> {
   if (file.size > MAX_FILE_SIZE) {
     throw new Error('File too large. Maximum size is 100 MB.');
   }
 
-  // Local dev: always use direct upload (no GCS credentials locally)
-  // Production small files: also use direct upload
+  // Local dev or small files: direct upload (synchronous processing)
   if (isLocalDev || file.size <= LARGE_FILE_THRESHOLD) {
-    return uploadFile(file, getToken);
+    const result = await uploadFile(file, getToken);
+    return { kind: 'completed', result };
   }
 
-  // Production large files: use signed URL → GCS → async processing
+  // Large files: upload to GCS → enqueue → return immediately
   const { signedUrl, fileId, gcsPath } = await getSignedUploadUrl(file, getToken);
   await uploadToGcs(file, signedUrl, onProgress);
-  return processUploadedFile({ fileId, gcsPath, filename: file.name }, getToken, onProcessing);
+  const jobId = await enqueueFileProcessing({ fileId, gcsPath, filename: file.name }, getToken);
+  return { kind: 'enqueued', jobId, filename: file.name };
 }
 
 export async function getSession(
