@@ -10,7 +10,8 @@ A conversational AI study assistant with persistent memory, document RAG, and in
 - **Smart Retrieval** - Hybrid Rule-Based and LLM-powered retrieval gate that decides when to search documents vs. memories vs. neither
 - **React Web UI** - Mobile-responsive chat interface with document upload and markdown rendering
 - **User Authentication** - Clerk-based auth with automatic user provisioning and per-user data isolation
-- **Large File Upload** - Files over 25 MB bypass Firebase limits via signed URL upload to GCS with async processing and polling
+- **Large File Upload** - Files over 25 MB bypass Firebase limits via signed URL upload to GCS with BullMQ-based job queue processing
+- **Job Queue** - BullMQ worker queue for file processing with automatic retries, progress tracking, stall detection, and graceful shutdown
 - **Production Resilience** - Rate limiting, retry with exponential backoff on external APIs, and graceful fallback to keyword-only search when embeddings are unavailable
 
 ## Architecture Overview
@@ -362,34 +363,34 @@ The frontend decides which path to take based on file size and environment:
 ### Large File Path (> 25 MB in Production)
 
 ```
-Browser                          Cloud Run                            GCS                    Voyage AI
-   |                                |                                  |                        |
-   |-- POST /api/upload/signed-url ->|                                  |                        |
-   |   {filename, type, size}        |                                  |                        |
-   |                                 |-- generateSignedUploadUrl ------>|                        |
-   |<-- {signedUrl, fileId, gcsPath} |                                  |                        |
-   |                                 |                                  |                        |
-   |-- PUT signedUrl (file bytes) ---|----------(bypasses server)------>|  stored in GCS         |
-   |   [XHR progress events → UI]    |                                  |                        |
-   |                                 |                                  |                        |
-   |-- POST /api/upload/process ---->|                                  |                        |
-   |   {fileId, gcsPath, filename}   |-- Redis: job='processing' ------>|                        |
-   |<-- {jobId, status: 'processing'}|                                  |                        |
-   |                                 |-- downloadAsBuffer ------------>|                        |
-   |   [UI: "Processing..."]         |<-- file buffer -----------------|                        |
-   |                                 |-- extractText (PDFLoader)        |                        |
-   |                                 |-- chunkText → N chunks           |                        |
-   |                                 |-- embedBatch (64/call) ---------|----------------------->|
-   |                                 |<-- embeddings ------------------|------------------------|
-   |                                 |   ... repeat batches ...         |                        |
-   |                                 |-- upsertChunks (DB)              |                        |
-   |                                 |-- deleteFile from GCS ---------->|  cleaned up            |
-   |                                 |-- Redis: job='completed'         |                        |
-   |                                 |                                  |                        |
-   |-- GET /api/upload/status/{id} ->|                                  |                        |
-   |<-- {status:'completed', result} |                                  |                        |
-   |                                 |                                  |                        |
-   |   [UI: "Uploaded — N chunks ingested."]                            |                        |
+Browser                          Express Server                  BullMQ Worker              GCS           Voyage AI
+   |                                |                                |                      |                |
+   |-- POST /api/upload/signed-url ->|                                |                      |                |
+   |   {filename, type, size}        |                                |                      |                |
+   |                                 |-- generateSignedUploadUrl -----|--------------------->|                |
+   |<-- {signedUrl, fileId, gcsPath} |                                |                      |                |
+   |                                 |                                |                      |                |
+   |-- PUT signedUrl (file bytes) ---|--------------(bypasses server)--|--------------------->| stored in GCS  |
+   |   [XHR progress events → UI]    |                                |                      |                |
+   |                                 |                                |                      |                |
+   |-- POST /api/upload/process ---->|                                |                      |                |
+   |   {fileId, gcsPath, filename}   |-- queue.add('process-file') -->|                      |                |
+   |<-- {jobId, status: 'queued'}    |                                |                      |                |
+   |                                 |                                |-- downloadAsBuffer ->|                |
+   |   [UI unblocked — can chat]     |                                |<-- file buffer ------|                |
+   |                                 |                                |-- extractText        |                |
+   |                                 |                                |-- chunkText → N      |                |
+   |                                 |                                |-- embedBatch --------|--------------->|
+   |                                 |                                |<-- embeddings -------|----------------|
+   |                                 |                                |   ... batches ...    |                |
+   |                                 |                                |-- upsertChunks (DB)  |                |
+   |                                 |                                |-- deleteFile ------->| cleaned up     |
+   |                                 |                                |-- job.completed      |                |
+   |                                 |                                |                      |                |
+   |-- GET /api/upload/status/{id} ->|-- queue.getJob(id) ----------->|                      |                |
+   |<-- {status:'completed', result} |                                |                      |                |
+   |                                 |                                |                      |                |
+   |   [UI: "Uploaded — N chunks ingested."]                          |                      |                |
 ```
 
 ### Step-by-Step Breakdown
@@ -406,26 +407,32 @@ Two infrastructure requirements:
 - **GCS CORS** (`cors.json`): The bucket must allow PUT from the app's origins, otherwise the browser's preflight OPTIONS request fails
 - **CSP header** (`helmet` config): `connectSrc` must include `https://storage.googleapis.com`, otherwise the Content Security Policy blocks the XHR
 
-**3. Async Processing** (`POST /api/upload/process`)
+**3. BullMQ Job Queue** (`POST /api/upload/process`)
 
-After the file lands in GCS, the frontend tells the backend to process it. In production, the backend:
-1. Creates a job ID, stores `{ status: 'processing' }` in Redis (1-hour TTL)
-2. Returns `{ jobId, status: 'processing' }` immediately (< 100ms)
-3. Processes the file in the background (same Node process, fire-and-forget)
+After the file lands in GCS, the frontend tells the backend to process it. The backend enqueues a job via BullMQ and returns immediately:
+1. Adds a job to the `file-processing` queue with `jobId = fileId` (natural deduplication)
+2. Returns `{ jobId, status: 'queued' }` immediately (< 100ms)
+3. The in-process BullMQ worker picks up the job asynchronously
 
-This avoids Firebase's 60-second timeout — the HTTP response is already sent before heavy processing begins.
+This is a unified path for both production and development — all uploads go through the queue. The UI is unblocked immediately after enqueue; the user can chat or upload more files while processing continues in the background.
+
+Queue configuration:
+- **Concurrency:** 2 jobs in parallel (allows overlap — one downloading while one embeds)
+- **Retries:** 3 attempts with exponential backoff (10s base delay)
+- **Lock duration:** 5 minutes (accommodates large files)
+- **Retention:** Completed jobs kept 24 hours, failed jobs kept 7 days
+- **Stall detection:** BullMQ automatically retries jobs if the worker crashes mid-processing
 
 Security: the endpoint verifies `gcsPath.startsWith('uploads/{userId}/')` so users can't reference other users' files, and checks `fileExists` in GCS before processing.
 
-In development, processing is synchronous (returns the result directly) since there's no Firebase timeout locally.
+**4. Progress Tracking & Polling** (`pollJobStatus` in `client.ts`)
 
-**4. Polling** (`processUploadedFile` in `client.ts`)
-
-The frontend detects the async path when the response contains a `jobId`, then polls `GET /api/upload/status/{jobId}` every 3 seconds:
+The frontend polls `GET /api/upload/status/{jobId}` every 3 seconds. The status endpoint reads directly from BullMQ (not manual Redis keys) and includes progress stages reported by the worker:
 
 | Poll Result | Action |
 |-------------|--------|
-| `status: 'processing'` | Continue polling |
+| `status: 'queued'` | Continue polling (job waiting for worker) |
+| `status: 'processing'` + `progress.stage` | Continue polling, update UI with stage (downloading, extracting text, embedding, cleaning up) |
 | `status: 'completed'` | Return the result |
 | `status: 'failed'` | Throw with error message |
 | Auth redirect / non-API URL | Skip this poll, retry next (token may have expired) |
@@ -433,13 +440,15 @@ The frontend detects the async path when the response contains a `jobId`, then p
 
 Auth resilience: Clerk tokens can expire during a long processing job. The polling loop catches `Session expired` errors and continues — `getToken` refreshes the token on the next iteration.
 
-**5. File Processing** (`processGcsFile` in `server.ts`)
+**5. File Processing** (`processGcsFile` in `src/ingest/processGcsFile.ts`)
 
-1. Downloads the file from GCS into a Node.js Buffer
-2. Extracts text using LangChain loaders (PDFLoader, DocxLoader, or raw UTF-8)
+The BullMQ worker calls `processGcsFile` with an `onProgress` callback that reports each stage back to the job:
+
+1. Downloads the file from GCS into a Node.js Buffer → `progress: 'downloading'`
+2. Extracts text using LangChain loaders (PDFLoader, DocxLoader, or raw UTF-8) → `progress: 'extracting_text'`
 3. Extracts title from PDF metadata → content heuristics → cleaned filename
-4. Calls `ingestDocument` (chunking + embedding + storage)
-5. Deletes the file from GCS (data is in the database now)
+4. Calls `ingestDocument` (chunking + embedding + storage) → `progress: 'embedding'`
+5. Deletes the file from GCS (data is in the database now) → `progress: 'cleaning_up'`
 
 ### Batched Embedding — `ingestDocument`
 
@@ -476,48 +485,52 @@ Every `fetch` call in the frontend parses responses through `safeFetchJson`, whi
 | `POLL_TIMEOUT_MS` | `client.ts` | 10 min | Max wait before "timed out" |
 | `EMBED_BATCH_SIZE` | `ingestDocument.ts` | 64 | Texts per Voyage AI call |
 | `BATCH_DELAY_MS` | `ingestDocument.ts` | 500 ms | Pause between batches |
-| `JOB_TTL` | `server.ts` | 3,600 s | Redis job key expiration |
+| Queue concurrency | `workers.ts` | 2 | Parallel jobs per worker instance |
+| Queue attempts | `queues.ts` | 3 | Max retries per job |
+| Queue backoff | `queues.ts` | 10s exponential | Delay between retries |
+| `removeOnComplete` | `queues.ts` | 24 hours | Completed job retention |
+| `removeOnFail` | `queues.ts` | 7 days | Failed job retention |
+| `lockDuration` | `workers.ts` | 5 min | Worker lock for large files |
 
 ## Scaling Roadmap
 
-The current synchronous architecture is optimized for simplicity and low latency at moderate scale. Here's how it would evolve for 10k+ concurrent users:
+### Current Architecture
 
-### Current: Synchronous Request-Response
+Chat requests are synchronous (Express → LLM → response). File processing is queued via BullMQ with an in-process worker. This is optimal for simplicity and latency at moderate scale.
+
+**Already implemented:**
+- **BullMQ job queue** for file upload processing — retries, progress tracking, stall detection, non-blocking UI
+- **In-process worker** (concurrency 2) — runs alongside Express in the same Cloud Run instance
+
+### Phase 1: Separate Worker Service
 
 ```
-User → Express API → LLM call (5-15s) → DB query → Response
+User → Express API (Cloud Run)           Worker Service (Cloud Run)
+              |                                    |
+              |-- queue.add() --> Redis <-- worker.process()
+              |                                    |-- download, extract, embed
 ```
 
-Each request holds a connection for the full LLM duration. This is optimal for latency but limits throughput — each Cloud Run instance can only handle a handful of concurrent requests.
+Split the BullMQ worker into a dedicated Cloud Run service. The queue code is already architected for this — `src/queue/workers.ts` can run standalone. This lets you scale API instances and worker instances independently.
 
-### Phase 1: Job Queue + Workers
+### Phase 2: Chat Queue + SSE
 
 ```
 User → Express API → Push to Queue → Return "accepted" (50ms)
                           ↓
-                    Worker Process → LLM call → DB query → Write result
+                    Worker → LLM call → DB query → Write result
                           ↓
                     Redis Pub/Sub → SSE push to client
 ```
 
-**Key changes:**
-- **BullMQ** (backed by existing Redis) handles job queuing with automatic retries and prioritization
-- **Worker service** runs as a separate Cloud Run service, scaled independently from the API
-- **Server-Sent Events (SSE)** push responses back to the client in real-time
-- API response time drops from seconds to milliseconds, allowing one instance to handle thousands of requests
+Move chat requests through the queue when LLM latency becomes a throughput bottleneck. The heavy logic (`getFormattedAnswerToUserinput`) is already isolated and can be moved into a worker with minimal refactoring.
 
-**Why this helps:** The API server is no longer blocked waiting on LLM responses. Workers stay 100% utilized processing jobs, and the queue naturally buffers traffic spikes and LLM rate limits.
-
-### Phase 2: Connection Pooling + Read Replicas
+### Phase 3: Connection Pooling + Read Replicas
 
 At high read volume, the database becomes the bottleneck:
 - **PgBouncer** for connection pooling (reduce per-connection overhead)
 - **Read replicas** for embedding search queries (separate read/write traffic)
-- **Redis caching** for frequently accessed memories and user profiles
-
-### Why Not Now
-
-The synchronous architecture gives the best latency for the current scale and is simpler to debug and monitor. The queue adds ~50-100ms of overhead per request and introduces eventual consistency. The migration path is straightforward since the heavy logic (`getFormattedAnswerToUserinput`) is already isolated and can be moved into a worker with minimal refactoring.
+- **Redis caching** for frequently accessed embeddings and user profiles
 
 ## Project Structure
 
@@ -566,7 +579,16 @@ The synchronous architecture gives the best latency for the current scale and is
     │   └── extractMemories.ts   # Knowledge extraction
     │
     ├── ingest/
-    │   └── ingestDocument.ts    # Document chunking + embedding
+    │   ├── ingestDocument.ts    # Document chunking + embedding
+    │   └── processGcsFile.ts   # GCS download → text extraction → ingestion
+    │
+    ├── queue/
+    │   ├── index.ts             # Queue lifecycle (init/shutdown) + exports
+    │   ├── connection.ts        # ioredis connection config for BullMQ
+    │   ├── jobTypes.ts          # TypeScript interfaces for job data/result/progress
+    │   ├── queues.ts            # file-processing queue (lazy singleton)
+    │   ├── workers.ts           # BullMQ worker (concurrency 2, progress reporting)
+    │   └── statusHelper.ts      # BullMQ state → API response mapping
     │
     ├── services/
     │   └── EmbeddingService.ts  # VoyageAI embeddings
@@ -715,20 +737,21 @@ Response: { "signedUrl": "https://storage.googleapis.com/...", "fileId": "uuid",
 
 ### POST /api/upload/process
 
-Trigger processing of a file already uploaded to GCS. Returns immediately in production (async).
+Enqueue a GCS-uploaded file for processing via BullMQ. Returns immediately.
 
 ```json
 Request:  { "fileId": "uuid", "gcsPath": "uploads/...", "filename": "textbook.pdf" }
-Response: { "jobId": "uuid", "status": "processing" }
+Response: { "jobId": "uuid", "status": "queued" }
 ```
 
 ### GET /api/upload/status/:jobId
 
-Poll for async processing job status.
+Poll for job status. Reads directly from BullMQ, includes progress stages.
 
 ```json
 Response: { "status": "completed", "result": { "documentId": "...", "chunkCount": 142 } }
-      or: { "status": "processing" }
+      or: { "status": "processing", "progress": { "stage": "embedding", "detail": "..." } }
+      or: { "status": "queued" }
       or: { "status": "failed", "error": "Could not extract text..." }
 ```
 
