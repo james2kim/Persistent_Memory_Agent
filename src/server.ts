@@ -22,6 +22,7 @@ import { runBackgroundSummarization, runBackgroundExtraction } from './agent/bac
 import { MAX_MESSAGES } from './agent/constants';
 import { LangSmithUtil } from './util/LangSmithUtil';
 import { TitleExtractor } from './util/TitleExtractor';
+import { summarizeDocumentText } from './llm/summarizeDocument';
 import {
   generateSignedUploadUrl,
   fileExists,
@@ -372,6 +373,12 @@ app.post('/api/upload', requireAuth(), (req, res, next) => {
       filename: originalname,
       title: extractedTitle,
     });
+
+    // Fire-and-forget: generate summary
+    summarizeDocumentText(textContent)
+      .then((summary) => documentStore.updateSummary(result.documentId, summary))
+      .then(() => console.log(`[upload] Summary generated for ${result.documentId}`))
+      .catch((err) => console.error('[upload] Summary generation failed (non-fatal):', err));
   } catch (err) {
     console.error('Error in /api/upload:', err);
     const message = err instanceof Error ? err.message : 'Failed to process upload';
@@ -656,6 +663,47 @@ app.get('/api/trace', requireAuth(), async (req, res) => {
   } catch (err) {
     console.error('Error in /api/trace:', err);
     res.status(500).json({ error: 'Failed to get trace' });
+  }
+});
+
+// GET /api/documents - List user's documents
+app.get('/api/documents', requireAuth(), async (req, res) => {
+  try {
+    const { userId: clerkUserId } = getAuth(req);
+    if (!clerkUserId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const userId = await getOrCreateUser(clerkUserId);
+    const documents = await documentStore.listDocuments(userId);
+
+    res.json({ documents });
+  } catch (err) {
+    console.error('Error in GET /api/documents:', err);
+    res.status(500).json({ error: 'Failed to list documents' });
+  }
+});
+
+// DELETE /api/documents/:id - Delete a document and its chunks
+app.delete('/api/documents/:id', requireAuth(), async (req, res) => {
+  try {
+    const { userId: clerkUserId } = getAuth(req);
+    if (!clerkUserId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const userId = await getOrCreateUser(clerkUserId);
+    const docId = req.params.id as string;
+    const deleted = await documentStore.deleteDocument(docId, userId);
+
+    if (!deleted) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error in DELETE /api/documents/:id:', err);
+    res.status(500).json({ error: 'Failed to delete document' });
   }
 });
 

@@ -5,6 +5,7 @@ import { downloadAsBuffer, deleteFile } from '../util/GcsUtil.js';
 import { ingestDocument } from './ingestDocument.js';
 import { TitleExtractor } from '../util/TitleExtractor.js';
 import { DocumentStore } from '../stores/DocumentStore.js';
+import { summarizeDocumentText } from '../llm/summarizeDocument.js';
 import { db } from '../db/knex.js';
 
 type ExtractedContent = {
@@ -73,7 +74,7 @@ const MIME_MAP: Record<string, string> = {
   '.txt': 'text/plain',
 };
 
-export type ProgressStage = 'downloading' | 'extracting_text' | 'embedding' | 'cleaning_up' | 'completed';
+export type ProgressStage = 'downloading' | 'extracting_text' | 'embedding' | 'summarizing' | 'cleaning_up' | 'completed';
 
 export interface ProcessGcsFileOptions {
   userId: string;
@@ -124,6 +125,15 @@ export async function processGcsFile({
     },
     userId
   );
+
+  onProgress?.('summarizing', 'Generating document summary');
+  try {
+    const summary = await summarizeDocumentText(textContent);
+    await documentStore.updateSummary(result.documentId, summary);
+    console.log(`[processGcsFile] Summary generated for ${result.documentId}`);
+  } catch (err) {
+    console.error('[processGcsFile] Summary generation failed (non-fatal):', err);
+  }
 
   onProgress?.('cleaning_up', 'Removing temporary file from storage');
   await deleteFile(gcsPath).catch((err) =>

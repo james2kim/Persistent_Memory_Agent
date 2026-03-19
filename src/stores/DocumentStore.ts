@@ -84,6 +84,29 @@ export class DocumentStore {
     return await query;
   }
 
+  async listDocuments(userId: string, trx?: Knex.Transaction) {
+    const k = trx ?? this.knex;
+    return k('documents')
+      .select('id', 'source', 'title', 'summary', 'metadata', 'created_at', 'updated_at')
+      .where('user_id', userId)
+      .orderBy('created_at', 'desc');
+  }
+
+  async deleteDocument(documentId: string, userId: string, trx?: Knex.Transaction) {
+    const k = trx ?? this.knex;
+    const deleted = await k('documents')
+      .where({ id: documentId, user_id: userId })
+      .del();
+    return deleted > 0;
+  }
+
+  async updateSummary(documentId: string, summary: string, trx?: Knex.Transaction) {
+    const k = trx ?? this.knex;
+    await k('documents')
+      .where({ id: documentId })
+      .update({ summary, updated_at: k.fn.now() });
+  }
+
   async upsertChunks(
     input: {
       user_id: string;

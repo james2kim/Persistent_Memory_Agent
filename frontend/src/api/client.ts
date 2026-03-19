@@ -73,6 +73,51 @@ export async function safeFetchJson<T = Record<string, unknown>>(response: Respo
   }
 }
 
+export interface DocumentItem {
+  id: string;
+  source: string;
+  title: string | null;
+  summary: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function listDocuments(
+  getToken: () => Promise<string | null>
+): Promise<DocumentItem[]> {
+  const authHeaders = await getAuthHeaders(getToken);
+
+  const response = await fetch('/api/documents', {
+    headers: authHeaders,
+  });
+
+  if (!response.ok) {
+    const data = await safeFetchJson(response);
+    throw new Error((data as Record<string, string>).error || 'Failed to list documents');
+  }
+
+  const data = await safeFetchJson<{ documents: DocumentItem[] }>(response);
+  return data.documents;
+}
+
+export async function deleteDocument(
+  documentId: string,
+  getToken: () => Promise<string | null>
+): Promise<void> {
+  const authHeaders = await getAuthHeaders(getToken);
+
+  const response = await fetch(`/api/documents/${documentId}`, {
+    method: 'DELETE',
+    headers: authHeaders,
+  });
+
+  if (!response.ok) {
+    const data = await safeFetchJson(response);
+    throw new Error((data as Record<string, string>).error || 'Failed to delete document');
+  }
+}
+
 export async function sendMessage(
   message: string,
   getToken: () => Promise<string | null>
@@ -193,7 +238,7 @@ const POLL_INTERVAL_MS = 3000;
 const POLL_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
 
 interface JobStatusProgress {
-  stage: 'downloading' | 'extracting_text' | 'embedding' | 'cleaning_up' | 'completed';
+  stage: 'downloading' | 'extracting_text' | 'embedding' | 'summarizing' | 'cleaning_up' | 'completed';
   detail?: string;
 }
 

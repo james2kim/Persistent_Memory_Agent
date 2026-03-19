@@ -14,6 +14,6 @@ export interface FileProcessingJobResult {
 }
 
 export interface FileProcessingProgress {
-  stage: 'downloading' | 'extracting_text' | 'embedding' | 'cleaning_up' | 'completed';
+  stage: 'downloading' | 'extracting_text' | 'embedding' | 'summarizing' | 'cleaning_up' | 'completed';
   detail?: string;
 }

@@ -42,6 +42,33 @@ header h1 {
   font-weight: 500;
 }
 
+.header-tabs {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.tab-button {
+  background: transparent;
+  color: rgba(255, 255, 255, 0.7);
+  border: none;
+  padding: 0.4rem 1rem;
+  font-size: 0.9rem;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+
+.tab-button:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+}
+
+.tab-button.active {
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+  font-weight: 500;
+}
+
 .header-actions {
   display: flex;
   align-items: center;
@@ -362,6 +389,93 @@ button.secondary:disabled {
   }
 }
 
+/* Document list styles */
+.documents-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.document-card {
+  background: white;
+  border-radius: 8px;
+  padding: 1rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.document-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.document-card-header h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #2c3e50;
+  margin: 0;
+  word-break: break-word;
+}
+
+.document-delete-btn {
+  background: transparent;
+  color: #e74c3c;
+  border: 1px solid #e74c3c;
+  padding: 0.25rem 0.75rem;
+  font-size: 0.8rem;
+  border-radius: 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.document-delete-btn:hover {
+  background: #e74c3c;
+  color: white;
+}
+
+.document-confirm-delete {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+  font-size: 0.8rem;
+  color: #666;
+}
+
+.document-delete-yes {
+  background: #e74c3c;
+  color: white;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.8rem;
+  border-radius: 4px;
+}
+
+.document-delete-no {
+  background: #ecf0f1;
+  color: #2c3e50;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.8rem;
+  border-radius: 4px;
+}
+
+.document-summary {
+  color: #555;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  margin-bottom: 0.5rem;
+}
+
+.document-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  color: #999;
+}
+
 /* Mobile responsive styles */
 @media (max-width: 600px) {
   .container {
@@ -418,5 +532,18 @@ button.secondary:disabled {
 
   header h1 {
     font-size: 1.1rem;
+  }
+
+  .header-tabs {
+    gap: 0.15rem;
+  }
+
+  .tab-button {
+    padding: 0.3rem 0.6rem;
+    font-size: 0.8rem;
+  }
+
+  .document-card-header {
+    flex-direction: column;
   }
 }
