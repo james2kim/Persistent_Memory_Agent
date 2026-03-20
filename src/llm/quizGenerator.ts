@@ -30,6 +30,7 @@ const INTENT_EXTRACTION_PROMPT = `You are a quiz parameter extractor. Given a us
 - Only set focusAreas if the user explicitly mentions specific subtopics or areas to focus on
 - If the user says "true/false" or "T/F", set questionTypes to ["true_false"]
 - If the user says "mixed", set questionTypes to ["multiple_choice", "true_false"]
+- For the "topic" field, use the user's EXACT words. Do NOT expand acronyms or add interpretations.
 
 ## Examples
 - "quiz me on photosynthesis" → topic: "photosynthesis", questionCount: 5, questionTypes: ["multiple_choice"], difficulty: "medium"
@@ -113,6 +114,8 @@ ${input.focusAreas?.length ? `- Focus areas: ${input.focusAreas.join(', ')}` : '
 
 ## Rules
 1. ALL questions MUST be grounded in the provided study materials. Do not make up facts.
+   - If the study materials do NOT contain information about the requested topic, set the title to "TOPIC_NOT_FOUND" and generate 0 questions (empty array).
+   - NEVER use your general knowledge to fill gaps. Only use information explicitly present in the study materials below.
 2. For multiple_choice questions: provide 4 options (A-D). The correctAnswer MUST exactly match one of the options.
 3. For true_false questions: options MUST be exactly ["True", "False"]. The correctAnswer MUST be either "True" or "False".
 4. Each explanation should reference the source material and explain WHY the answer is correct.

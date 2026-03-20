@@ -32,6 +32,7 @@ import type { AgentTrace } from './schemas/types';
 import { setCircuitBreakerRedis } from './util/RetryUtil';
 import { WorkflowRunStore } from './stores/WorkflowRunStore';
 import { QuizStore } from './stores/QuizStore';
+import { FlashcardStore } from './stores/FlashcardStore';
 import { ProgressEmitter } from './util/ProgressEmitter';
 
 // Supported file types
@@ -286,17 +287,28 @@ app.post('/api/chat', requireAuth(), async (req, res) => {
       sessionId,
     };
 
-    if (result?.workflowData !== undefined) {
+    // Only persist workflow data if this request actually executed a workflow
+    const executedWorkflow = trace?.spans?.some(
+      (s) => s.node === 'executeWorkflow' && s.meta?.success === true
+    );
+
+    if (executedWorkflow && result?.workflowData !== undefined) {
       response.workflowData = result.workflowData;
 
-      // Persist quiz to database
-      const wd = result.workflowData as { title?: string; questions?: unknown[] };
+      const wd = result.workflowData as { title?: string; questions?: unknown[]; cards?: unknown[] };
       if (wd?.title && wd?.questions) {
         try {
           const quizId = await QuizStore.save(userId, wd.title, result.workflowData, {});
           response.quizId = quizId;
         } catch (err) {
           console.error('[/api/chat] Failed to save quiz:', err);
+        }
+      } else if (wd?.title && wd?.cards) {
+        try {
+          const flashcardId = await FlashcardStore.save(userId, wd.title, result.workflowData, {});
+          response.flashcardId = flashcardId;
+        } catch (err) {
+          console.error('[/api/chat] Failed to save flashcards:', err);
         }
       }
     }
@@ -814,6 +826,55 @@ app.delete('/api/quizzes/:id', requireAuth(), async (req, res) => {
   } catch (err) {
     console.error('Error in DELETE /api/quizzes/:id:', err);
     res.status(500).json({ error: 'Failed to delete quiz' });
+  }
+});
+
+// GET /api/flashcards - List user's flashcard sets
+app.get('/api/flashcards', requireAuth(), async (req, res) => {
+  try {
+    const { userId: clerkUserId } = getAuth(req);
+    if (!clerkUserId) return res.status(401).json({ error: 'Unauthorized' });
+
+    const userId = await getOrCreateUser(clerkUserId);
+    const flashcards = await FlashcardStore.list(userId);
+    res.json({ flashcards });
+  } catch (err) {
+    console.error('Error in GET /api/flashcards:', err);
+    res.status(500).json({ error: 'Failed to list flashcards' });
+  }
+});
+
+// GET /api/flashcards/:id - Get a single flashcard set
+app.get('/api/flashcards/:id', requireAuth(), async (req, res) => {
+  try {
+    const { userId: clerkUserId } = getAuth(req);
+    if (!clerkUserId) return res.status(401).json({ error: 'Unauthorized' });
+
+    const userId = await getOrCreateUser(clerkUserId);
+    const flashcard = await FlashcardStore.get(req.params.id as string, userId);
+    if (!flashcard) return res.status(404).json({ error: 'Flashcard set not found' });
+
+    res.json({ flashcard });
+  } catch (err) {
+    console.error('Error in GET /api/flashcards/:id:', err);
+    res.status(500).json({ error: 'Failed to get flashcard set' });
+  }
+});
+
+// DELETE /api/flashcards/:id - Delete a flashcard set
+app.delete('/api/flashcards/:id', requireAuth(), async (req, res) => {
+  try {
+    const { userId: clerkUserId } = getAuth(req);
+    if (!clerkUserId) return res.status(401).json({ error: 'Unauthorized' });
+
+    const userId = await getOrCreateUser(clerkUserId);
+    const deleted = await FlashcardStore.delete(req.params.id as string, userId);
+    if (!deleted) return res.status(404).json({ error: 'Flashcard set not found' });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error in DELETE /api/flashcards/:id:', err);
+    res.status(500).json({ error: 'Failed to delete flashcard set' });
   }
 });
 

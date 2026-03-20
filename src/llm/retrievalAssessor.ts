@@ -5,7 +5,7 @@ import {
 } from '../schemas/types';
 import { haikuModel } from '../agent/constants';
 import { withRetry } from '../util/RetryUtil';
-import { routeToTool } from '../workflows/registry';
+import { selectTool } from './toolSelector';
 
 const SYSTEM_PROMPT = `Classify this query for a study assistant.
 
@@ -32,13 +32,12 @@ const modelWithSchema = haikuModel.withStructuredOutput(retrievalGateAssessmentS
 
 interface RuleBasedResult {
   assessment: RetrievalGateAssessment;
-  matchedToolName?: string;
 }
 
 /**
  * Rule-based pre-filter for obvious query types.
  * Returns assessment if pattern matches, null if LLM should decide.
- * Saves LLM calls for 60-70% of queries.
+ * Does NOT handle workflow detection — that's done by the LLM tool selector.
  */
 const ruleBasedClassify = (query: string): RuleBasedResult | null => {
   const q = query.trim();
@@ -60,8 +59,7 @@ const ruleBasedClassify = (query: string): RuleBasedResult | null => {
     }};
   }
 
-  // Off-topic - lifestyle/personal advice patterns (must run BEFORE personal rules
-  // because "should I ... ?" matches both off-topic and personal question patterns)
+  // Off-topic - lifestyle/personal advice patterns (must run BEFORE personal rules)
   if (/\b(should i|would you recommend|can i get.*(advice|recommendation)).*(wear|eat|buy|invest|date|sleep|nap|stock)\b/i.test(lower)) {
     return { assessment: {
       queryType: 'off_topic',
@@ -77,8 +75,7 @@ const ruleBasedClassify = (query: string): RuleBasedResult | null => {
     }};
   }
 
-  // Unclear - vague requests that need clarification (must run BEFORE personal statements
-  // because "I need more information" matches "I need..." personal pattern)
+  // Unclear - vague requests
   if (/^i\s+need\s+(more\s+)?(information|info|details|help|context)\s*\.?$/i.test(q)) {
     return { assessment: {
       queryType: 'unclear',
@@ -87,7 +84,7 @@ const ruleBasedClassify = (query: string): RuleBasedResult | null => {
     }};
   }
 
-  // Personal statements - "I am/like/prefer/want/study/work/have..."
+  // Personal statements
   if (/^i\s+(am|like|prefer|want|need|study|work|have|live|go|usually|always|never)\b/i.test(q)) {
     return { assessment: {
       queryType: 'personal',
@@ -96,7 +93,7 @@ const ruleBasedClassify = (query: string): RuleBasedResult | null => {
     }};
   }
 
-  // Personal questions - "my goal", "my schedule", "what did I say"
+  // Personal questions
   if (/\b(my|i)\b/i.test(q) && /\?$/.test(q)) {
     return { assessment: {
       queryType: 'personal',
@@ -112,23 +109,9 @@ const ruleBasedClassify = (query: string): RuleBasedResult | null => {
     }};
   }
 
-  // Workflow - delegate to the tool registry as single source of truth
-  const workflowRoute = routeToTool(q);
-  if (workflowRoute) {
-    return {
-      assessment: {
-        queryType: 'workflow',
-        referencesPersonalContext: false,
-        reasoning: 'rule: matched registered workflow tool',
-      },
-      matchedToolName: workflowRoute.tool.name,
-    };
-  }
-
   // Study content - explicit topic questions
-  // "give me", "show me", "tell me" imply personalization
   if (
-    /^(explain|describe|summarize|what is|what are|how does|how do|why does|why do)\s+/i.test(q)
+    /^(explain|describe|summarize|what is|what are|how does|how do|why does|why do|why is|why are|why was|why were)\s+/i.test(q)
   ) {
     const hasPersonal = /\b(my|me|i)\b/i.test(q);
     if (!hasPersonal) {
@@ -140,7 +123,6 @@ const ruleBasedClassify = (query: string): RuleBasedResult | null => {
     }
   }
 
-  // "give me", "show me", "tell me" + topic = study content with personal context
   if (/^(give me|show me|tell me|help me)\s+/i.test(q)) {
     return { assessment: {
       queryType: 'study_content',
@@ -149,11 +131,9 @@ const ruleBasedClassify = (query: string): RuleBasedResult | null => {
     }};
   }
 
-  // General knowledge - simple factual questions
+  // General knowledge
   if (
-    /^(what is|who is|when was|where is)\s+(the\s+)?(capital|president|population|date|year|definition)/i.test(
-      q
-    )
+    /^(what is|who is|when was|where is)\s+(the\s+)?(capital|president|population|date|year|definition)/i.test(q)
   ) {
     return { assessment: {
       queryType: 'general_knowledge',
@@ -162,7 +142,16 @@ const ruleBasedClassify = (query: string): RuleBasedResult | null => {
     }};
   }
 
-  // No rule matched - let LLM decide
+  // Off-topic - lifestyle advice (catch-all)
+  if (/\b(should i|would you recommend).*(wear|eat|buy|invest|date|sleep|nap)\b/i.test(lower)) {
+    return { assessment: {
+      queryType: 'off_topic',
+      referencesPersonalContext: false,
+      reasoning: 'rule: lifestyle advice',
+    }};
+  }
+
+  // No rule matched
   return null;
 };
 
@@ -179,19 +168,33 @@ export interface AssessorResult {
 
 /**
  * Classifies a query for routing decisions.
- * Uses rule-based filter first, falls back to LLM for ambiguous cases.
+ *
+ * Three-stage pipeline:
+ * 1. Rule-based fast path for obvious non-workflow queries (free, instant)
+ * 2. LLM tool selection via Anthropic tool_use (decides if a workflow tool should be invoked)
+ * 3. LLM classification fallback for ambiguous queries
  */
 export const retrievalGateAssessor = async (query: string): Promise<AssessorResult> => {
-  // Try rule-based classification first (fast, free)
+  // Stage 1: Rule-based classification (fast, free)
   const ruleResult = ruleBasedClassify(query);
   if (ruleResult) {
+    return { assessment: ruleResult.assessment };
+  }
+
+  // Stage 2: LLM tool selection — let the model decide if a tool should be used
+  const toolResult = await selectTool(query);
+  if (toolResult.toolName) {
     return {
-      assessment: ruleResult.assessment,
-      matchedWorkflowTool: ruleResult.matchedToolName,
+      assessment: {
+        queryType: 'workflow',
+        referencesPersonalContext: false,
+        reasoning: `LLM tool selection: ${toolResult.toolName}`,
+      },
+      matchedWorkflowTool: toolResult.toolName,
     };
   }
 
-  // Fall back to LLM for ambiguous queries
+  // Stage 3: LLM classification for remaining ambiguous queries
   try {
     const result = await withRetry(
       () => modelWithSchema.invoke([
@@ -202,11 +205,13 @@ export const retrievalGateAssessor = async (query: string): Promise<AssessorResu
     );
     console.log(`[retrievalGateAssessor] LLM-based: ${result.queryType}`);
 
-    // When LLM says workflow, resolve the tool name now — the query may be
-    // rewritten before executeWorkflow runs, breaking keyword matching.
+    // If LLM says workflow but tool selector didn't catch it, try tool selection again
+    // This handles edge cases where the classifier detects intent but tool selector missed it
     if (result.queryType === 'workflow') {
-      const route = routeToTool(query);
-      return { assessment: result, matchedWorkflowTool: route?.tool.name };
+      const retryTool = await selectTool(query);
+      if (retryTool.toolName) {
+        return { assessment: result, matchedWorkflowTool: retryTool.toolName };
+      }
     }
 
     return { assessment: result };
@@ -234,7 +239,7 @@ export const retrievalGatePolicy = (assessment: RetrievalGateAssessment): Retrie
     };
   }
 
-  // Off-topic: no retrieval, route to clarificationResponse which handles refusal
+  // Off-topic: route to clarification/refusal
   if (queryType === 'off_topic') {
     return {
       shouldRetrieveDocuments: false,
@@ -246,7 +251,7 @@ export const retrievalGatePolicy = (assessment: RetrievalGateAssessment): Retrie
     };
   }
 
-  // Unclear: no retrieval, ask clarifying question
+  // Unclear: ask clarifying question
   if (queryType === 'unclear') {
     return {
       shouldRetrieveDocuments: false,
@@ -282,7 +287,7 @@ export const retrievalGatePolicy = (assessment: RetrievalGateAssessment): Retrie
     };
   }
 
-  // Personal: retrieve both documents and memories with full budget
+  // Personal: retrieve both
   if (queryType === 'personal') {
     return {
       shouldRetrieveDocuments: true,
@@ -294,8 +299,7 @@ export const retrievalGatePolicy = (assessment: RetrievalGateAssessment): Retrie
     };
   }
 
-  // Study content: retrieve both documents and memories
-  // Use full budget if explicitly personal, minimal otherwise
+  // Study content: retrieve both
   return {
     shouldRetrieveDocuments: true,
     shouldRetrieveMemories: true,

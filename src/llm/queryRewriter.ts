@@ -11,7 +11,9 @@ const topicSchema = z.object({
 const TOPIC_EXTRACTION_PROMPT = `Extract the most recent topic from the conversation context.
 Return a short noun phrase (2-6 words) describing what was most recently discussed.
 The context is ordered most-recent-first — use the FIRST substantive topic you see.
-If no clear topic exists, return "unknown".`;
+If no clear topic exists, return "unknown".
+
+IMPORTANT: Use the EXACT terms and acronyms from the conversation. Do NOT expand or reinterpret acronyms. If the conversation says "MMR", return "MMR" — do NOT expand it to "Measles, Mumps, Rubella" or anything else.`;
 
 const modelWithSchema = haikuModel.withStructuredOutput(topicSchema);
 

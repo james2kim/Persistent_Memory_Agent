@@ -387,6 +387,83 @@ export async function uploadFileSmart(
   return { kind: 'enqueued', jobId, filename: file.name };
 }
 
+// ============================================================================
+// Flashcard API
+// ============================================================================
+
+export interface FlashcardCard {
+  front: string;
+  back: string;
+}
+
+export interface FlashcardData {
+  title: string;
+  topicSummary: string;
+  cards: FlashcardCard[];
+}
+
+export interface FlashcardListItem {
+  id: string;
+  title: string;
+  card_count: number;
+  created_at: string;
+}
+
+export interface FlashcardRecord {
+  id: string;
+  user_id: string;
+  title: string;
+  flashcard_data: FlashcardData;
+  input_data: unknown;
+  created_at: string;
+}
+
+export async function listFlashcards(
+  getToken: () => Promise<string | null>
+): Promise<FlashcardListItem[]> {
+  const authHeaders = await getAuthHeaders(getToken);
+  const response = await fetch('/api/flashcards', { headers: authHeaders });
+  if (!response.ok) {
+    const data = await safeFetchJson(response);
+    throw new Error((data as Record<string, string>).error || 'Failed to list flashcards');
+  }
+  const data = await safeFetchJson<{ flashcards: FlashcardListItem[] }>(response);
+  return data.flashcards;
+}
+
+export async function getFlashcard(
+  flashcardId: string,
+  getToken: () => Promise<string | null>
+): Promise<FlashcardRecord> {
+  const authHeaders = await getAuthHeaders(getToken);
+  const response = await fetch(`/api/flashcards/${flashcardId}`, { headers: authHeaders });
+  if (!response.ok) {
+    const data = await safeFetchJson(response);
+    throw new Error((data as Record<string, string>).error || 'Failed to get flashcard set');
+  }
+  const data = await safeFetchJson<{ flashcard: FlashcardRecord }>(response);
+  return data.flashcard;
+}
+
+export async function deleteFlashcard(
+  flashcardId: string,
+  getToken: () => Promise<string | null>
+): Promise<void> {
+  const authHeaders = await getAuthHeaders(getToken);
+  const response = await fetch(`/api/flashcards/${flashcardId}`, {
+    method: 'DELETE',
+    headers: authHeaders,
+  });
+  if (!response.ok) {
+    const data = await safeFetchJson(response);
+    throw new Error((data as Record<string, string>).error || 'Failed to delete flashcard set');
+  }
+}
+
+// ============================================================================
+// Quiz API
+// ============================================================================
+
 export async function listQuizzes(
   getToken: () => Promise<string | null>
 ): Promise<QuizListItem[]> {

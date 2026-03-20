@@ -208,6 +208,24 @@ export const SMOKE_TEST_DATASET: SmokeTestCase[] = [
     dataset_split: ['base'],
   },
 
+  // === WORKFLOW: FLASHCARD SINGLE-TURN ===
+  {
+    userQuery: 'Make me flashcards about why context in the middle is bad',
+    category: 'workflow',
+    expected_behavior: 'ANSWER',
+    expected_workflow_tool: 'flashcard_generation',
+    quiz_topic_keywords: ['middle', 'context', 'position', 'primacy', 'recency'],
+    dataset_split: ['base'],
+  },
+  {
+    userQuery: 'Create study cards on the ReAct framework',
+    category: 'workflow',
+    expected_behavior: 'ANSWER',
+    expected_workflow_tool: 'flashcard_generation',
+    quiz_topic_keywords: ['react', 'reasoning', 'acting', 'tool', 'observation'],
+    dataset_split: ['base'],
+  },
+
   // === WORKFLOW: MULTI-TURN (Context inference) ===
   {
     userQuery: 'make me a quiz on it',

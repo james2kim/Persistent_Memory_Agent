@@ -29,9 +29,14 @@ export function QuizList({ onSelectQuiz }: QuizListProps) {
   if (quizzes.length === 0) {
     return (
       <div className="documents-list">
-        <p style={{ textAlign: 'center', color: '#666' }}>
-          No quizzes yet. Ask the agent to make you a quiz in the Chat tab!
-        </p>
+        <div className="document-card empty-state-card">
+          <div className="document-card-header">
+            <h3>No quizzes yet</h3>
+          </div>
+          <p className="document-summary">
+            Ask the agent to make you a quiz in the Chat tab! Try something like "Make me a quiz about information retrieval".
+          </p>
+        </div>
       </div>
     );
   }

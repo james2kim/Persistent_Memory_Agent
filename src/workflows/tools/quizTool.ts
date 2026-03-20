@@ -143,10 +143,10 @@ export const quizTool: WorkflowTool = {
       const input = intent.data;
 
       // ---- Step 2: Context enrichment via in-workflow retrieval ----
+      // Always retrieve based on the extracted topic. The initial retrieval used
+      // the raw user query which may have matched wrong docs.
       let activeContextBlock = contextBlock;
-      const contextThin = !activeContextBlock || activeContextBlock.length < 500;
-
-      if (contextThin) {
+      {
         const retrievalResult = await runner.runStep<{ chunksAdded: number; finalLength: number }>(
           'contextRetrieval',
           'workflowContextRetrieval',
@@ -224,6 +224,15 @@ export const quizTool: WorkflowTool = {
       );
 
       const quiz = gen.data;
+
+      // Check if the LLM signaled topic not found
+      if (quiz.title === 'TOPIC_NOT_FOUND' || quiz.questions.length === 0) {
+        return runner.failure(
+          `I don't have study materials on "${input.topic}" to create a quiz from. Please upload some documents or notes on this topic first, then try again.`,
+          'insufficient_context'
+        );
+      }
+
       normalizeTrueFalse(quiz);
 
       // ---- Step 4: Validate quiz ----

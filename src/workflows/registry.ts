@@ -1,5 +1,6 @@
 import type { WorkflowTool, RouteResult } from './types';
 import { quizTool } from './tools/quizTool';
+import { flashcardTool } from './tools/flashcardTool';
 
 /**
  * All registered workflow tools.
@@ -8,7 +9,7 @@ import { quizTool } from './tools/quizTool';
  */
 export const REGISTERED_TOOLS: readonly WorkflowTool[] = [
   quizTool,
-  // flashcardTool,
+  flashcardTool,
   // studyPlanTool,
 ];
 

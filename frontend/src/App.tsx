@@ -7,9 +7,12 @@ import { ThinkingIndicator } from './components/ThinkingIndicator';
 import { DocumentList } from './components/DocumentList';
 import { QuizList } from './components/QuizList';
 import { QuizView } from './components/QuizView';
+import { FlashcardList } from './components/FlashcardList';
+import { FlashcardView } from './components/FlashcardView';
 import { useChat } from './hooks/useChat';
 
-type Tab = 'chat' | 'documents' | 'quizzes';
+type Tab = 'chat' | 'documents' | 'study';
+type StudyView = 'list' | 'quiz' | 'flashcard';
 
 function App() {
   const { messages, isLoading, progressLabel, rateLimit, handleSend, handleUpload } = useChat();
@@ -17,8 +20,9 @@ function App() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [activeTab, setActiveTab] = useState<Tab>('chat');
   const [documentsKey, setDocumentsKey] = useState(0);
-  const [quizzesKey, setQuizzesKey] = useState(0);
-  const [selectedQuizId, setSelectedQuizId] = useState<string | null>(null);
+  const [studyKey, setStudyKey] = useState(0);
+  const [studyView, setStudyView] = useState<StudyView>('list');
+  const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
 
   // Auto-scroll to bottom when messages change
@@ -32,9 +36,10 @@ function App() {
     if (tab === 'documents') {
       setDocumentsKey((k) => k + 1);
     }
-    if (tab === 'quizzes') {
-      setQuizzesKey((k) => k + 1);
-      setSelectedQuizId(null);
+    if (tab === 'study') {
+      setStudyKey((k) => k + 1);
+      setStudyView('list');
+      setSelectedItemId(null);
     }
   };
 
@@ -60,10 +65,10 @@ function App() {
               Documents
             </button>
             <button
-              className={`tab-button${activeTab === 'quizzes' ? ' active' : ''}`}
-              onClick={() => switchTab('quizzes')}
+              className={`tab-button${activeTab === 'study' ? ' active' : ''}`}
+              onClick={() => switchTab('study')}
             >
-              Quizzes
+              Study
             </button>
           </div>
         </SignedIn>
@@ -118,19 +123,27 @@ function App() {
             <DocumentList key={documentsKey} />
           </div>
         )}
-        {activeTab === 'quizzes' && (
+        {activeTab === 'study' && (
           <div className="container">
-            {selectedQuizId ? (
+            {studyView === 'quiz' && selectedItemId ? (
               <QuizView
-                key={selectedQuizId}
-                quizId={selectedQuizId}
-                onBack={() => setSelectedQuizId(null)}
+                key={selectedItemId}
+                quizId={selectedItemId}
+                onBack={() => { setStudyView('list'); setSelectedItemId(null); }}
+              />
+            ) : studyView === 'flashcard' && selectedItemId ? (
+              <FlashcardView
+                key={selectedItemId}
+                flashcardId={selectedItemId}
+                onBack={() => { setStudyView('list'); setSelectedItemId(null); }}
               />
             ) : (
-              <QuizList
-                key={quizzesKey}
-                onSelectQuiz={(id) => setSelectedQuizId(id)}
-              />
+              <div className="study-lists" key={studyKey}>
+                <h3 className="study-section-title">Quizzes</h3>
+                <QuizList onSelectQuiz={(id) => { setSelectedItemId(id); setStudyView('quiz'); }} />
+                <h3 className="study-section-title">Flashcards</h3>
+                <FlashcardList onSelect={(id) => { setSelectedItemId(id); setStudyView('flashcard'); }} />
+              </div>
             )}
           </div>
         )}

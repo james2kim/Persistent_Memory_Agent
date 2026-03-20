@@ -8,9 +8,10 @@ A conversational AI study assistant with persistent memory, document RAG, and in
 - **Document RAG** - Upload and query documents with hybrid search (semantic + keyword + temporal)
 - **Session Continuity** - Redis-backed sessions with automatic summary archival to long-term memory
 - **Smart Retrieval** - Hybrid Rule-Based and LLM-powered retrieval gate that decides when to search documents vs. memories vs. neither
-- **Workflow Tool Calling** - Extensible tool system with durable execution, keyword-based routing, and automatic resumption on failure
+- **Autonomous Tool Selection** - LLM-driven tool selection via Anthropic's native tool_use API, backed by durable workflow execution with Redis-based step caching and automatic resumption on failure
 - **Quiz Generation** - Multi-step workflow tool that extracts intent, enriches context, generates quizzes, validates output, and persists results
-- **React Web UI** - Mobile-responsive chat interface with document upload, quiz taking, and markdown rendering
+- **Flashcard Generation** - Multi-step workflow tool that generates study flashcards from documents with interactive 3D flip card UI
+- **React Web UI** - Mobile-responsive chat interface with document upload, quiz taking, flashcard review, and markdown rendering
 - **User Authentication** - Clerk-based auth with automatic user provisioning and per-user data isolation
 - **Large File Upload** - Files over 25 MB bypass Firebase limits via signed URL upload to GCS with BullMQ-based job queue processing
 - **Job Queue** - BullMQ worker queue for file processing with automatic retries, progress tracking, stall detection, and graceful shutdown
@@ -30,7 +31,7 @@ A conversational AI study assistant with persistent memory, document RAG, and in
 │  │                       retrievalGate                                │  │
 │  │  • Rewrite query (resolve pronouns via LLM extract + regex sub)   │  │
 │  │  • Classify: rule-based (60-70%) or LLM fallback (Haiku)         │  │
-│  │  • Pre-resolve workflow tool via keyword matching                  │  │
+│  │  • LLM tool selection via Anthropic tool_use (autonomous)        │  │
 │  │  • Policy decides: retrieve? clarify? workflow?                   │  │
 │  └───────────────────────────┬───────────────────────────────────────┘  │
 │            ┌─────────────────┼─────────────────┐                        │
@@ -128,6 +129,15 @@ Permanent storage for extracted knowledge and documents:
 | `question_count` | Number of questions |
 | `user_id` | Owner |
 
+**flashcards table:**
+| Field | Description |
+|-------|-------------|
+| `title` | Flashcard set title (from generation) |
+| `flashcard_data` | JSON: full output with title, topicSummary, and cards array |
+| `input_data` | JSON: extracted intent (topic, cardCount, difficulty) |
+| `card_count` | Number of cards in the set |
+| `user_id` | Owner |
+
 ## Workflow Nodes
 
 ### 1. retrievalGate
@@ -154,9 +164,20 @@ Handles 60-70% of queries without LLM calls:
 - Personal questions ("my goal", "what did I say") → `personal`
 - Topic questions ("explain X", "what is Y") → `study_content`
 - Lifestyle advice ("should I nap?") → `off_topic`
-- Tool keywords (quiz, test, practice) → `workflow` (pre-resolves tool)
 
-**LLM Assessment** (Haiku - for ambiguous cases):
+**LLM Tool Selection** (Haiku with `bindTools` — autonomous tool routing):
+
+When no rule-based classification matches, the LLM sees the registered tools via Anthropic's native `tool_use` API and autonomously decides whether to invoke one:
+
+```typescript
+const modelWithTools = haikuModel.bindTools(langchainTools);
+// LLM sees: quiz_generation, flashcard_generation
+// Decides: call a tool, or respond that no tool is needed
+```
+
+If the LLM calls a tool → route to workflow execution. If no tool is called → fall through to LLM classification.
+
+**LLM Classification Fallback** (Haiku — for remaining ambiguous cases):
 
 - `queryType`: personal | study_content | general_knowledge | conversational | off_topic | unclear | workflow
 - `referencesPersonalContext`: boolean
@@ -260,12 +281,12 @@ The summary is appended to the session's running summary, preserving context acr
 Routes to and executes registered workflow tools (e.g., quiz generation).
 
 **Tool Routing:**
-The retrieval gate may pre-resolve the tool via keyword matching during classification. If not pre-resolved, `executeWorkflow` runs keyword scoring against all registered tools. This two-pass approach ensures tool routing is robust even when query rewriting changes the original phrasing.
+The retrieval gate resolves the tool via LLM tool selection (`model.bindTools()` + Anthropic `tool_use`). The selected tool name is stored in agent state as `matchedWorkflowTool`. As a defense-in-depth fallback, `executeWorkflow` also has keyword-based scoring if the LLM selection didn't resolve a tool.
 
 ```typescript
-// Pre-resolved by gate (preferred — query-invariant)
+// LLM-selected tool (preferred — autonomous selection)
 const preResolved = state.matchedWorkflowTool ? getToolByName(state.matchedWorkflowTool) : null;
-// Fallback: score keywords against rewritten query
+// Fallback: keyword scoring against registered tools
 const routeResult = preResolved ? { tool: preResolved } : routeToTool(userQuery);
 ```
 
@@ -306,15 +327,15 @@ Pure semantic search misses queries like "what did I do in 2023" because embeddi
 - **Temporal filter**: `start_year <= queryYear AND (end_year IS NULL OR end_year >= queryYear)`
 - **RRF fusion**: Combines both rankings fairly
 
-### 3. Retrieval Gate (Rule-Based + LLM Fallback)
+### 3. Three-Stage Routing (Rules → Tool Selection → LLM Classification)
 
-Most queries can be classified without an LLM call:
+Query routing uses a progressive pipeline that balances speed, cost, and accuracy:
 
-- **Rule-based filter**: Regex patterns handle greetings, personal statements, topic questions (~60-70% of queries)
-- **LLM fallback**: Haiku handles ambiguous cases that don't match patterns
-- **Deterministic policy**: Code decides retrieval strategy based on classification
+1. **Rule-based filter** (~60-70%): Regex patterns handle greetings, personal statements, topic questions — instant, free
+2. **LLM tool selection**: For unmatched queries, the LLM sees registered tools via `bindTools()` and autonomously decides whether to invoke one
+3. **LLM classification fallback**: If no tool was selected, Haiku classifies the query type for retrieval routing
 
-This reduces latency and cost while maintaining accuracy.
+This ensures workflow tools are selected by the LLM (handling ambiguous phrasings), while obvious non-workflow queries bypass the LLM entirely.
 
 ### 4. Two-Tier Memory Retrieval
 
@@ -385,21 +406,29 @@ Three layers protect against transient external API failures:
 - Contextual memories (goals, decisions) are skipped since they require similarity search
 - The `embeddingFallback` flag is captured in trace metadata for observability
 
-### 11. Keyword-Based Tool Routing
+### 11. LLM-Driven Tool Selection
 
-Workflow tools are routed via deterministic keyword matching, not LLM-based function calling. Each tool registers an array of regex patterns:
+Workflow tools are routed via Anthropic's native `tool_use` API. Each registered tool is converted to a LangChain `tool()` definition and bound to the model:
 
 ```typescript
-keywords: [
-  /\b(quiz|test|assess)\s+me\b/i,
-  /\bpractice\s+(test|questions|problems)\b/i,
-  /\b(make|create|generate)\b.*\b(quiz|test|questions)\b/i,
-]
+const langchainTools = REGISTERED_TOOLS.map((wfTool) =>
+  tool(async (input) => JSON.stringify(input), {
+    name: wfTool.name,
+    description: wfTool.description,
+    schema: z.object({ topic: z.string() }),
+  })
+);
+const modelWithTools = haikuModel.bindTools(langchainTools);
 ```
 
-Routing scores all tools by counting keyword matches and picks the highest. This is auditable (you can see exactly why a tool was selected), fast (no LLM call), and avoids hallucinated tool names. The tradeoff is manual keyword curation, but the tool surface is small enough that this is practical.
+The LLM autonomously decides whether to invoke a tool based on the user's intent. This handles ambiguous phrasings ("help me study with some review cards") that regex patterns would miss, while the tool definitions constrain the LLM to only select from registered tools — no hallucinated tool names.
 
-**Pre-Resolution:** The retrieval gate runs keyword matching during classification and stores the matched tool name in agent state. This means the tool is resolved against the *original* query before any rewriting, preventing cases where pronoun resolution strips away tool-triggering keywords.
+**Three-Stage Routing Pipeline:**
+1. **Rule-based fast path** — Greetings, off-topic, personal, study content matched instantly (free, no LLM call)
+2. **LLM tool selection** — For unmatched queries, the LLM sees tool descriptions and decides if one should be invoked
+3. **LLM classification fallback** — If no tool was selected, classify the query type for retrieval routing
+
+**Defense-in-Depth:** `executeWorkflow` retains a keyword-based fallback router as a safety net. If LLM tool selection fails or the tool name is lost during state propagation, keyword scoring resolves the tool from the query text.
 
 ### 12. Workflow Tool Abstraction
 
@@ -423,7 +452,7 @@ interface WorkflowContext {
 }
 ```
 
-Tools don't manage their own retrieval, routing, or persistence — they receive pre-fetched context and a durable run handle. This lets new tools be added by defining keywords + an `execute` function and registering in the tool registry. The `WorkflowRunner` handles token accumulation, error mapping, and observability for all tools uniformly.
+Tools don't manage their own retrieval, routing, or persistence — they receive pre-fetched context and a durable run handle. This lets new tools be added by defining a name, description, and `execute` function, then registering in the tool registry. The LLM discovers tools automatically via `bindTools`. The `WorkflowRunner` handles token accumulation, error mapping, and observability for all tools uniformly.
 
 ### 13. Durable Workflow Execution
 
@@ -613,6 +642,86 @@ The frontend provides an interactive quiz-taking UI:
 
 - **QuizList**: Lists saved quizzes with title, question count, creation date, and delete with confirmation
 - **QuizView**: Interactive quiz with option selection, submit scoring, correct/incorrect visual feedback, explanations, and retake
+
+## Flashcard Generation Workflow
+
+The flashcard tool is the second workflow tool, following the same durable execution patterns as the quiz tool. It generates study flashcards from uploaded documents.
+
+```
+User: "Make me flashcards on cellular respiration"
+                │
+                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Step 1: Intent Extraction (Haiku)                              │
+│  Extract: topic, cardCount (default 10), difficulty (default    │
+│           medium), focusAreas from user query + conversation    │
+│  Timeout: 45s                                                    │
+└───────────────────────────────┬─────────────────────────────────┘
+                                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Step 2: Context Enrichment (non-durable)                       │
+│  Retrieve docs for extracted topic via ctx.retrieve()          │
+│  Filter duplicates, normalize confidence to 0.3                │
+│  Rebuild context block (≥ 100 chars required)                  │
+└───────────────────────────────┬─────────────────────────────────┘
+                                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Step 3: Flashcard Generation (Sonnet)                          │
+│  Generate structured output: title, topicSummary, cards[]      │
+│  Each card: front (question/term) + back (answer/explanation)  │
+│  Grounded in study materials — returns TOPIC_NOT_FOUND if      │
+│  topic isn't covered │ Timeout: 120s │ Durable                 │
+└───────────────────────────────┬─────────────────────────────────┘
+                                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Step 4: Validation (deterministic, no LLM)                     │
+│  • Front text ≥ 5 chars, back text ≥ 10 chars                  │
+│  • No duplicate fronts (case-insensitive)                       │
+│  • Card count mismatch → warning (not error)                    │
+└───────────────────────────────┬─────────────────────────────────┘
+                                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Step 5: Format + Persist                                       │
+│  • Render as markdown (title + summary + numbered cards)       │
+│  • Return response + raw flashcard data for DB persistence     │
+│  • Auto-saved to PostgreSQL via /api/chat handler              │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Schemas
+
+```typescript
+// Input (extracted from user query)
+flashcardInputSchema: {
+  topic: string (2-200 chars),
+  cardCount: int (1-30),
+  difficulty: 'easy' | 'medium' | 'hard',
+  focusAreas?: string[] (max 5),
+}
+
+// Output (generated flashcard set)
+flashcardOutputSchema: {
+  title: string (5-200 chars),
+  topicSummary: string (10-500 chars),
+  cards: [{
+    front: string (5-300 chars),   // question, term, or concept
+    back: string (10-500 chars),   // answer, definition, or explanation
+  }] (max 30 items),
+}
+```
+
+### Card Variety
+
+The generation prompt instructs the model to vary card types across definitions, concepts, comparisons, cause-and-effect, and application questions. Difficulty adjusts the complexity of both fronts and backs (easy: basic recall, medium: understanding, hard: application/synthesis).
+
+### Topic Not Found
+
+If the extracted topic isn't covered by the user's documents, the model returns `title: "TOPIC_NOT_FOUND"` with an empty cards array instead of hallucinating content. This is detected before persistence and returns a helpful message to the user.
+
+### Frontend Flashcard Experience
+
+- **FlashcardList**: Lists saved flashcard sets with title, card count, creation date, and delete with confirmation
+- **FlashcardView**: Interactive card-by-card viewer with 3D flip animation (CSS `rotateY(180deg)` with `preserve-3d`), previous/next navigation, and card counter
 
 ## File Upload Pipeline
 
@@ -1019,9 +1128,12 @@ Send a message and get a response. If the response triggers a workflow tool (e.g
 Request:  { "message": "What's in my biology notes?" }
 Response: { "response": "Based on your notes...", "sessionId": "..." }
 
-// Workflow response (quiz):
+// Workflow responses:
 Request:  { "message": "Quiz me on cellular respiration" }
 Response: { "response": "## Biology Quiz\n...", "sessionId": "...", "quizId": "uuid" }
+
+Request:  { "message": "Make me flashcards on React hooks" }
+Response: { "response": "## React Hooks Flashcards\n...", "sessionId": "...", "flashcardId": "uuid" }
 ```
 
 ### POST /api/upload
@@ -1081,6 +1193,30 @@ Response: { "quiz": { "id": "...", "title": "...", "quiz_data": { "title": "..."
 ### DELETE /api/quizzes/:id
 
 Delete a quiz. Returns success status.
+
+```json
+Response: { "success": true }
+```
+
+### GET /api/flashcards
+
+List all flashcard sets for the authenticated user.
+
+```json
+Response: { "flashcards": [{ "id": "...", "title": "...", "card_count": 10, "created_at": "..." }] }
+```
+
+### GET /api/flashcards/:id
+
+Get a single flashcard set with full card data.
+
+```json
+Response: { "flashcard": { "id": "...", "title": "...", "flashcard_data": { "title": "...", "topicSummary": "...", "cards": [...] }, "input_data": {...}, "created_at": "..." } }
+```
+
+### DELETE /api/flashcards/:id
+
+Delete a flashcard set. Returns success status.
 
 ```json
 Response: { "success": true }

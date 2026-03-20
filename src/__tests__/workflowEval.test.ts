@@ -99,7 +99,14 @@ describe('Tool Routing', () => {
     'ask me questions about data structures',
   ];
 
-  const nonQuizQueries = [
+  const flashcardQueries = [
+    'make me flashcards about biology',
+    'create flashcards on the French Revolution',
+    'generate study cards for calculus',
+    'give me flash cards about data structures',
+  ];
+
+  const nonWorkflowQueries = [
     'what is photosynthesis',
     'explain the French Revolution',
     'help me understand calculus',
@@ -114,7 +121,13 @@ describe('Tool Routing', () => {
     expect(result!.tool.name).toBe('quiz_generation');
   });
 
-  it.each(nonQuizQueries)('should NOT route "%s" to any workflow', (query) => {
+  it.each(flashcardQueries)('should route "%s" to flashcard_generation', (query) => {
+    const result = routeToTool(query);
+    expect(result).not.toBeNull();
+    expect(result!.tool.name).toBe('flashcard_generation');
+  });
+
+  it.each(nonWorkflowQueries)('should NOT route "%s" to any workflow', (query) => {
     const result = routeToTool(query);
     expect(result).toBeNull();
   });
@@ -223,6 +236,28 @@ describe('Single-Turn Workflow', () => {
 
     // Should go through normal retrieval → response path
     expect(spanNodes).toContain('retrievalGate');
+  }, 60_000);
+
+  it('should generate flashcards when explicitly asked', async () => {
+    const sid = newSessionId();
+    const { response, trace } = await runAgent(
+      'make me 5 flashcards about information retrieval',
+      sid
+    );
+
+    expect(response).toBeDefined();
+    expect(trace).toBeDefined();
+
+    // Routed to workflow
+    const gateSpan = trace!.spans.find((s) => s.node === 'retrievalGate');
+    expect(gateSpan!.meta.queryType).toBe('workflow');
+
+    // Workflow executed
+    const spanNodes = trace!.spans.map((s) => s.node);
+    expect(spanNodes).toContain('executeWorkflow');
+
+    // Response contains flashcard content (front/back pairs)
+    expect(response!.toLowerCase()).toMatch(/flashcard/i);
   }, 60_000);
 });
 
