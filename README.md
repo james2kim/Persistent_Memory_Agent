@@ -916,15 +916,18 @@ At high read volume, the database becomes the bottleneck:
 ├── frontend/                    # React frontend (Vite)
 │   ├── src/
 │   │   ├── components/
-│   │   │   ├── DocumentList.tsx # Document management
-│   │   │   ├── QuizList.tsx     # Quiz listing + delete
-│   │   │   ├── QuizView.tsx     # Interactive quiz taking
-│   │   │   └── ConfirmModal.tsx # Reusable confirmation dialog
+│   │   │   ├── DocumentList.tsx   # Document management
+│   │   │   ├── QuizList.tsx       # Quiz listing + delete
+│   │   │   ├── QuizView.tsx       # Interactive quiz taking
+│   │   │   ├── FlashcardList.tsx  # Flashcard set listing + delete
+│   │   │   ├── FlashcardView.tsx  # Interactive 3D flip card viewer
+│   │   │   └── ConfirmModal.tsx   # Reusable confirmation dialog
 │   │   ├── hooks/
-│   │   │   ├── useChat.ts       # Chat state management
-│   │   │   └── useQuizzes.ts    # Quiz CRUD operations
+│   │   │   ├── useChat.ts         # Chat state management
+│   │   │   ├── useQuizzes.ts      # Quiz CRUD operations
+│   │   │   └── useFlashcards.ts   # Flashcard CRUD operations
 │   │   ├── api/
-│   │   │   └── client.ts        # API client (chat, docs, quizzes)
+│   │   │   └── client.ts          # API client (chat, docs, quizzes, flashcards)
 │   │   ├── utils/               # Markdown formatting
 │   │   └── App.tsx              # Main app component
 │   ├── package.json
@@ -956,7 +959,8 @@ At high read volume, the database becomes the bottleneck:
     │   ├── WorkflowRun.ts       # Durable execution state machine
     │   ├── durableTypes.ts      # WorkflowRunRecord, StepRecord types
     │   └── tools/
-    │       └── quizTool.ts      # Quiz generation workflow (5-step pipeline)
+    │       ├── quizTool.ts      # Quiz generation workflow (5-step pipeline)
+    │       └── flashcardTool.ts # Flashcard generation workflow (5-step pipeline)
     │
     ├── stores/
     │   ├── DocumentStore.ts     # Hybrid search, chunk management
@@ -964,6 +968,7 @@ At high read volume, the database becomes the bottleneck:
     │   ├── RedisSessionStore.ts # Session state management
     │   ├── UserStore.ts         # User CRUD operations
     │   ├── QuizStore.ts         # Quiz persistence (CRUD)
+    │   ├── FlashcardStore.ts   # Flashcard persistence (CRUD)
     │   └── WorkflowRunStore.ts  # Durable run state (Redis + Lua)
     │
     ├── memory/
@@ -975,6 +980,9 @@ At high read volume, the database becomes the bottleneck:
     │   ├── quizGenerator.ts     # Intent extraction + quiz generation
     │   ├── quizValidator.ts     # Deterministic quiz validation
     │   ├── quizFormatter.ts     # Markdown formatting + answer key
+    │   ├── flashcardGenerator.ts # Intent extraction + flashcard generation
+    │   ├── flashcardValidator.ts # Deterministic flashcard validation
+    │   ├── flashcardFormatter.ts # Markdown formatting for flashcard sets
     │   ├── promptBuilder.ts     # Context block + system prompt
     │   ├── summarizeMessages.ts # Conversation summarization
     │   └── extractMemories.ts   # Knowledge extraction
@@ -993,7 +1001,8 @@ At high read volume, the database becomes the bottleneck:
     │
     ├── schemas/
     │   ├── types.ts             # Zod schemas and TypeScript types
-    │   └── quizSchemas.ts       # Quiz input/output Zod schemas
+    │   ├── quizSchemas.ts       # Quiz input/output Zod schemas
+    │   └── flashcardSchemas.ts  # Flashcard input/output Zod schemas
     │
     ├── evals/
     │   ├── dataset.ts           # Test cases with expected behaviors
